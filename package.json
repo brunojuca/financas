@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint . && prettier --check .",
+    "update-reference": "node scripts/update-reference.mjs",
     "format": "prettier --write ."
   },
   "dependencies": {

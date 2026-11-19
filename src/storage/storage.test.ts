@@ -196,4 +196,18 @@ describe('backup migration', () => {
     const restored = await db.transactions.toArray();
     expect(restored.every((t) => typeof t.extraordinary === 'boolean')).toBe(true);
   });
+
+  it('reads version 2 backups (no investments)', async () => {
+    await loadDemoData('2026-11');
+    const backup = await createBackup();
+    expect(backup.data.titulos.length).toBeGreaterThan(0);
+    const v2 = JSON.parse(JSON.stringify({ ...backup, schemaVersion: 2 }));
+    delete v2.data.titulos;
+    delete v2.data.lots;
+    delete v2.data.redemptions;
+    await clearAllData();
+    await restoreBackup(parseBackup(v2));
+    expect(await db.titulos.count()).toBe(0);
+    expect(await db.transactions.count()).toBe(backup.data.transactions.length);
+  });
 });

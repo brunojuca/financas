@@ -4,6 +4,8 @@ import { indexCategories } from '../domain/cashflow/summary';
 import { buildTransfer, type TransferInput } from '../domain/cashflow/transfer';
 import { addMonths, todayIso } from '../domain/dates';
 import { createDemoData } from '../domain/demo';
+import { createDemoInvestments } from '../domain/fixedIncome/demo';
+import type { Lot, Redemption, Titulo } from '../domain/fixedIncome/types';
 import type { ImportPlan } from '../domain/import/plan';
 import { createDefaultSeed, findTransferCategory } from '../domain/seed';
 import type {
@@ -32,11 +34,25 @@ export async function initializeWithSeed(): Promise<void> {
 
 export async function loadDemoData(lastMonth: YearMonth): Promise<void> {
   const demo = createDemoData(lastMonth, newId);
+  const investments = createDemoInvestments(lastMonth, newId);
   await clearAllData();
   await db.transaction(
     'rw',
-    [db.accounts, db.categories, db.transactions, db.budgets, db.recurring, db.meta],
+    [
+      db.accounts,
+      db.categories,
+      db.transactions,
+      db.budgets,
+      db.recurring,
+      db.titulos,
+      db.lots,
+      db.redemptions,
+      db.meta,
+    ],
     async () => {
+      await db.titulos.bulkPut(investments.titulos);
+      await db.lots.bulkPut(investments.lots);
+      await db.redemptions.bulkPut(investments.redemptions);
       await db.accounts.bulkPut(demo.accounts);
       await db.categories.bulkPut(demo.categories);
       await db.transactions.bulkPut(demo.transactions);
@@ -50,9 +66,22 @@ export async function loadDemoData(lastMonth: YearMonth): Promise<void> {
 export async function clearAllData(): Promise<void> {
   await db.transaction(
     'rw',
-    [db.accounts, db.categories, db.transactions, db.budgets, db.recurring, db.meta],
+    [
+      db.accounts,
+      db.categories,
+      db.transactions,
+      db.budgets,
+      db.recurring,
+      db.titulos,
+      db.lots,
+      db.redemptions,
+      db.meta,
+    ],
     () =>
       Promise.all([
+        db.titulos.clear(),
+        db.lots.clear(),
+        db.redemptions.clear(),
         db.accounts.clear(),
         db.categories.clear(),
         db.transactions.clear(),
@@ -229,4 +258,39 @@ export async function applyImportPlan(plan: ImportPlan): Promise<void> {
     await db.categories.bulkPut(plan.categories);
     await db.transactions.bulkPut(plan.transactions);
   });
+}
+
+// ---------- investments ----------
+
+/** Saves a título; with `firstLot`, also its first purchase, in one transaction. */
+export async function saveTitulo(titulo: Titulo, firstLot?: Lot): Promise<void> {
+  await db.transaction('rw', [db.titulos, db.lots], async () => {
+    await db.titulos.put(titulo);
+    if (firstLot) await db.lots.put(firstLot);
+  });
+}
+
+/** Deletes a título with its purchases and redemptions. */
+export async function deleteTitulo(id: string): Promise<void> {
+  await db.transaction('rw', [db.titulos, db.lots, db.redemptions], async () => {
+    await db.lots.where('tituloId').equals(id).delete();
+    await db.redemptions.where('tituloId').equals(id).delete();
+    await db.titulos.delete(id);
+  });
+}
+
+export async function saveLot(lot: Lot): Promise<void> {
+  await db.lots.put(lot);
+}
+
+export async function deleteLot(id: string): Promise<void> {
+  await db.lots.delete(id);
+}
+
+export async function saveRedemption(redemption: Redemption): Promise<void> {
+  await db.redemptions.put(redemption);
+}
+
+export async function deleteRedemption(id: string): Promise<void> {
+  await db.redemptions.delete(id);
 }

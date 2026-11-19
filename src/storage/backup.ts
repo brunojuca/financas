@@ -1,11 +1,15 @@
 import { isIsoDate, isYearMonth, formatDateBR } from '../domain/dates';
 import { formatDecimal } from '../domain/money';
+import type { Lot, Redemption, Titulo } from '../domain/fixedIncome/types';
 import type { Account, Budget, Category, RecurringTemplate, Transaction } from '../domain/types';
 import { db, META, setMeta } from './db';
 
 export const BACKUP_APP = 'financas';
-/** v2: transactions gained `extraordinary` and may have `categoryId: null`. */
-export const SCHEMA_VERSION = 2;
+/**
+ * v2: transactions gained `extraordinary` and may have `categoryId: null`.
+ * v3: investments (`titulos`, `lots`, `redemptions`); missing in older files → empty.
+ */
+export const SCHEMA_VERSION = 3;
 
 export interface BackupData {
   accounts: Account[];
@@ -13,6 +17,9 @@ export interface BackupData {
   transactions: Transaction[];
   budgets: Budget[];
   recurring: RecurringTemplate[];
+  titulos: Titulo[];
+  lots: Lot[];
+  redemptions: Redemption[];
 }
 
 export interface BackupFile {
@@ -25,18 +32,22 @@ export interface BackupFile {
 export class BackupError extends Error {}
 
 export async function createBackup(): Promise<BackupFile> {
-  const [accounts, categories, transactions, budgets, recurring] = await Promise.all([
-    db.accounts.toArray(),
-    db.categories.toArray(),
-    db.transactions.toArray(),
-    db.budgets.toArray(),
-    db.recurring.toArray(),
-  ]);
+  const [accounts, categories, transactions, budgets, recurring, titulos, lots, redemptions] =
+    await Promise.all([
+      db.accounts.toArray(),
+      db.categories.toArray(),
+      db.transactions.toArray(),
+      db.budgets.toArray(),
+      db.recurring.toArray(),
+      db.titulos.toArray(),
+      db.lots.toArray(),
+      db.redemptions.toArray(),
+    ]);
   return {
     app: BACKUP_APP,
     schemaVersion: SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
-    data: { accounts, categories, transactions, budgets, recurring },
+    data: { accounts, categories, transactions, budgets, recurring, titulos, lots, redemptions },
   };
 }
 
@@ -49,6 +60,9 @@ const isObj = (v: unknown): v is Record<string, unknown> =>
 const isStr = (v: unknown): v is string => typeof v === 'string';
 const isInt = (v: unknown): v is number => Number.isSafeInteger(v);
 const isNullableStr = (v: unknown) => v === null || isStr(v);
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const isNullableNum = (v: unknown) => v === null || isNum(v);
+const isNullableInt = (v: unknown) => v === null || isInt(v);
 
 function check(ok: boolean, what: string): void {
   if (!ok) throw new BackupError(what);
@@ -60,10 +74,20 @@ export function parseBackup(raw: unknown): BackupFile {
   const file = raw as Record<string, unknown>;
   check(isInt(file.schemaVersion), 'missing schemaVersion');
   check((file.schemaVersion as number) <= SCHEMA_VERSION, 'backup is from a newer app version');
-  // Future: migrate older schema versions here, step by step.
   check(isObj(file.data), 'missing data');
   const data = file.data as Record<string, unknown>;
-  for (const key of ['accounts', 'categories', 'transactions', 'budgets', 'recurring']) {
+  // v1/v2 → v3: no investments yet.
+  for (const key of ['titulos', 'lots', 'redemptions']) data[key] ??= [];
+  for (const key of [
+    'accounts',
+    'categories',
+    'transactions',
+    'budgets',
+    'recurring',
+    'titulos',
+    'lots',
+    'redemptions',
+  ]) {
     check(Array.isArray(data[key]), `missing ${key}`);
   }
   const all = (key: string, valid: (r: Record<string, unknown>) => boolean) =>
@@ -104,6 +128,37 @@ export function parseBackup(raw: unknown): BackupFile {
       isInt(r.dayOfMonth) &&
       isYearMonth(r.startMonth),
   );
+  all(
+    'titulos',
+    (r) =>
+      isStr(r.id) &&
+      isStr(r.name) &&
+      isStr(r.product) &&
+      (r.maturity === null || isIsoDate(r.maturity)) &&
+      isNum(r.rate) &&
+      isNum(r.cdiPercent),
+  );
+  all(
+    'lots',
+    (r) =>
+      isStr(r.id) &&
+      isStr(r.tituloId) &&
+      isIsoDate(r.date) &&
+      isInt(r.amountCents) &&
+      isNullableNum(r.quantity) &&
+      isNullableNum(r.unitPrice) &&
+      isNullableNum(r.rate),
+  );
+  all(
+    'redemptions',
+    (r) =>
+      isStr(r.id) &&
+      isStr(r.tituloId) &&
+      isIsoDate(r.date) &&
+      isNullableNum(r.quantity) &&
+      isNullableInt(r.grossCents) &&
+      isNullableInt(r.netCents),
+  );
   return raw as unknown as BackupFile;
 }
 
@@ -112,7 +167,17 @@ export async function restoreBackup(file: BackupFile): Promise<void> {
   const { data } = file;
   await db.transaction(
     'rw',
-    [db.accounts, db.categories, db.transactions, db.budgets, db.recurring, db.meta],
+    [
+      db.accounts,
+      db.categories,
+      db.transactions,
+      db.budgets,
+      db.recurring,
+      db.titulos,
+      db.lots,
+      db.redemptions,
+      db.meta,
+    ],
     async () => {
       await Promise.all([
         db.accounts.clear(),
@@ -120,6 +185,9 @@ export async function restoreBackup(file: BackupFile): Promise<void> {
         db.transactions.clear(),
         db.budgets.clear(),
         db.recurring.clear(),
+        db.titulos.clear(),
+        db.lots.clear(),
+        db.redemptions.clear(),
       ]);
       await db.accounts.bulkPut(data.accounts.map((a, i) => ({ ...a, order: a.order ?? i })));
       await db.categories.bulkPut(
@@ -135,6 +203,9 @@ export async function restoreBackup(file: BackupFile): Promise<void> {
       );
       await db.budgets.bulkPut(data.budgets);
       await db.recurring.bulkPut(data.recurring);
+      await db.titulos.bulkPut(data.titulos);
+      await db.lots.bulkPut(data.lots);
+      await db.redemptions.bulkPut(data.redemptions);
       await setMeta(META.initialized, new Date().toISOString());
     },
   );

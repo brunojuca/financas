@@ -101,3 +101,28 @@ export function formatMonthShort(ym: YearMonth): string {
     .replace('.', '')
     .replace(' de ', '/');
 }
+
+/** Days since 1970-01-01 (UTC arithmetic only, so no timezone effects). */
+export function epochDay(iso: IsoDate): number {
+  const { year, month, day } = parseIsoDate(iso);
+  return Date.UTC(year, month - 1, day) / 86_400_000;
+}
+
+export function fromEpochDay(days: number): IsoDate {
+  const d = new Date(days * 86_400_000);
+  return toIsoDate(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+}
+
+export function addDays(iso: IsoDate, n: number): IsoDate {
+  return fromEpochDay(epochDay(iso) + n);
+}
+
+/** Calendar days from `a` to `b` (b − a). */
+export function calendarDaysBetween(a: IsoDate, b: IsoDate): number {
+  return epochDay(b) - epochDay(a);
+}
+
+/** 0 = Sunday … 6 = Saturday. */
+export function weekday(iso: IsoDate): number {
+  return (epochDay(iso) + 4) % 7; // 1970-01-01 was a Thursday
+}

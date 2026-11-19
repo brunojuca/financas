@@ -5,15 +5,17 @@ Browser-based, client-side-only app that replaces two LibreOffice spreadsheets:
 1. **Cash flow** (`financas.ods`): transactions, account balances, monthly budget per category, recurring/installment templates.
 2. **Fixed-income portfolio** (`carteira-renda-fixa-du.ods`): Tesouro Direto / CDB / LCI-LCA held to maturity, with business-day (DU/252) math, IR, B3 custody, IPCA/CDI/Selic indexing and portfolio IRR.
 
-The exact spreadsheet logic and the reference values used for tests are in
-[docs/spreadsheet-reference.md](docs/spreadsheet-reference.md). Read it before touching any calculation.
+The spreadsheet logic and its reference values are in [docs/spreadsheet-reference.md](docs/spreadsheet-reference.md);
+the investments module plan is in [docs/investments-plan.md](docs/investments-plan.md). Read them before touching any calculation.
 
 ## Principles
 
 - **Privacy first.** No backend, no accounts, no analytics, no third-party scripts at runtime. User data never leaves the device.
   The only allowed network calls are GETs of _public_ reference data (see "Reference data"); they never carry user data.
 - **Works without a dev server.** The production build must be static files that open from disk or any static host.
-- **Calculations are the product.** The domain logic must match the spreadsheets to the cent, and every formula ported gets a test.
+- **Calculations are the product.** Cash flow matches the spreadsheet to the cent. For investments the spreadsheet defines
+  the requirements, not the formulas: follow the official methodology (Tesouro Direto, B3, Receita Federal) and document
+  any difference from the spreadsheet. Every formula gets a test.
 - **Mobile friendly.** Mobile-first responsive layout; everything usable at 360px width.
 - **Generic defaults, personal data stays out.** The app is for any user. Accounts, categories and subcategories start from a generic
   seed (`src/domain/seed.ts`, listed in the reference doc) and are fully user-editable (add, rename, archive, reorder).
@@ -57,7 +59,11 @@ Do not add dependencies beyond these without asking the user first.
 
 - Bundled snapshot in `src/reference/` so the app works offline; updates fetched on demand and cached in IndexedDB.
 - Source: Banco Central SGS API (CORS-enabled, `GET https://api.bcb.gov.br/dados/serie/bcdata.sgs.{code}/dados?formato=json&dataInicial=dd/MM/yyyy`):
-  Selic over a.a. `1178`, CDI a.a. `4389`, IPCA monthly `433`.
+  Selic daily `11`, CDI a.a. `4389`, Selic target `432`; IPCA number index from IBGE SIDRA (table 1737, variable 2266);
+  Focus expectations from BCB Olinda (`ExpectativasMercadoAnuais`, `ExpectativaMercadoMensais`); current Tesouro prices from the
+  Tesouro Direto site (`/o/rentabilidade/resgatar`, undocumented); daily price history from the Tesouro Transparente CSV, imported
+  by the user (its CORS blocks fetch). URLs in `src/reference/sources.ts`.
+  Downloads happen only when the user clicks "Atualizar dados" and are cached in the `reference` table (never in backups).
 - Fetch requests contain only series code and date range. No cookies, no identifiers.
 - National holidays are computed in code (fixed dates + Easter-based Carnaval, Paixão de Cristo, Corpus Christi; Consciência Negra from 2024), no API.
 
@@ -82,7 +88,7 @@ Do not add dependencies beyond these without asking the user first.
 - First run asks: start with the default seed, import a backup, or load demo data.
 - Credit-card statement closing/due dates are a later feature; the `creditCard` account type leaves room for it.
 - Dates: ISO strings `YYYY-MM-DD` for calendar dates. Never use `new Date('YYYY-MM-DD')` for date math (timezone bugs); use the helpers in `src/domain/dates.ts`.
-- Rates: decimals (`0.1164` = 11,64%). Keep full precision; round only where the spreadsheet rounds (e.g. daily factor to 8 places, money to 2).
+- Rates: decimals (`0.1164` = 11,64%). Keep full precision; round only where the official method rounds (e.g. daily DI factor to 8 places, money to 2).
 - IDs: `crypto.randomUUID()`.
 
 ## Project structure
@@ -96,7 +102,7 @@ src/
   reference/              # bundled public data: holidays (ANBIMA), selic/cdi history, ipca monthly (JSON)
   storage/                # Dexie db, repositories, backup export/import, migrations
   features/               # one folder per screen: components + hooks for that screen
-    dashboard/ transactions/ accounts/ budget/ recurring/ investments/ settings/
+    dashboard/ transactions/ accounts/ budget/ recurring/ investments/ import/ issues/ settings/
   components/             # shared UI (Button, MoneyInput, DataTable, Chart wrappers…)
   i18n/pt-BR.ts
   styles/
@@ -120,6 +126,7 @@ npm run lint         # eslint + prettier --check   (npm run format to fix)
 npx tsc -b           # type-check
 npm run build        # dist/: static site + PWA (service worker, manifest)
 npm run build:single # dist-single/index.html: one self-contained file, open by double-click
+npm run update-reference # refresh src/reference/*.json (BCB SGS, IBGE) — public data only
 ```
 
 `.claude/launch.json` has `dev` and `single-file` (serves dist-single/) preview configs.
@@ -129,7 +136,8 @@ no patched release exists yet. Re-check when updating dependencies.
 
 ## Working rules for Claude
 
-- Before implementing a calculation, find it in `docs/spreadsheet-reference.md`; add a test with the spreadsheet's expected value first.
+- Before implementing a calculation, find it in the docs and add a test with the expected value first (official published
+  data for investments; the spreadsheet's value for cash flow).
 - Run `npm test` and `npm run lint` before saying a change is done.
 - Never commit real personal financial data (the user's `.ods` files, backups, exports). `*.ods`, `*.json` backups and `exports/` stay git-ignored; test fixtures use the example rows only.
 - Keep the user informed in plain terms: this is their first project with Claude, so explain non-obvious decisions briefly.

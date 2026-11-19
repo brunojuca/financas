@@ -1,5 +1,14 @@
 import Dexie, { type EntityTable } from 'dexie';
+import type { Lot, Redemption, Titulo } from '../domain/fixedIncome/types';
 import type { Account, Budget, Category, MetaEntry, RecurringTemplate, Transaction } from '../domain/types';
+
+/** Public reference data downloaded on demand (series rows after the bundled snapshot, Focus survey). */
+export interface ReferenceEntry {
+  key: 'selic' | 'cdi' | 'selicMeta' | 'ipca' | 'focus' | 'tesouroPrices' | 'tesouroLive';
+  /** Series: [date or month, value] rows newer than the bundled files. Focus: the survey. Prices: parsed file. */
+  value: unknown;
+  fetchedAt: string;
+}
 
 export class FinancasDb extends Dexie {
   accounts!: EntityTable<Account, 'id'>;
@@ -8,6 +17,10 @@ export class FinancasDb extends Dexie {
   budgets!: EntityTable<Budget, 'id'>;
   recurring!: EntityTable<RecurringTemplate, 'id'>;
   meta!: EntityTable<MetaEntry, 'key'>;
+  titulos!: EntityTable<Titulo, 'id'>;
+  lots!: EntityTable<Lot, 'id'>;
+  redemptions!: EntityTable<Redemption, 'id'>;
+  reference!: EntityTable<ReferenceEntry, 'key'>;
 
   constructor(name = 'financas') {
     super(name);
@@ -31,6 +44,10 @@ export class FinancasDb extends Dexie {
             if (typeof t.extraordinary !== 'boolean') t.extraordinary = false;
           }),
       );
+    // v3: fixed-income investments (títulos, purchase lots, redemptions).
+    this.version(3).stores({ titulos: 'id', lots: 'id, tituloId', redemptions: 'id, tituloId' });
+    // v4: cache of public reference data (not user data: never in backups).
+    this.version(4).stores({ reference: 'key' });
   }
 }
 
@@ -43,6 +60,8 @@ export const META = {
   lastAccountId: 'lastAccountId',
   /** Date of the last entry saved from the transaction form (default for the next one). */
   lastDate: 'lastDate',
+  /** Investment projection scenario (JSON of `Scenario`). */
+  scenario: 'scenario',
 } as const;
 
 export async function getMeta(key: string): Promise<string | undefined> {

@@ -17,6 +17,7 @@ import { useDisclosure } from '@mantine/hooks';
 import {
   IconArrowsExchange,
   IconBuildingBank,
+  IconPigMoney,
   IconAlertCircle,
   IconCategory,
   IconFileImport,
@@ -28,7 +29,7 @@ import {
   IconTargetArrow,
 } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AccountsPage } from './features/accounts/AccountsPage';
@@ -44,11 +45,20 @@ import { WelcomePage } from './features/welcome/WelcomePage';
 import { t } from './i18n/pt-BR';
 import { db, getMeta, META, requestPersistentStorage } from './storage/db';
 
+// Investments (and their bundled market data) load only when opened.
+const InvestmentsPage = lazy(() =>
+  import('./features/investments/InvestmentsPage').then((m) => ({ default: m.InvestmentsPage })),
+);
+const TituloPage = lazy(() =>
+  import('./features/investments/TituloPage').then((m) => ({ default: m.TituloPage })),
+);
+
 const NAV = [
   { to: '/', label: t.nav.dashboard, icon: IconHome },
   { to: '/lancamentos', label: t.nav.transactions, icon: IconArrowsExchange },
   { to: '/pendencias', label: t.nav.issues, icon: IconAlertCircle },
   { to: '/contas', label: t.nav.accounts, icon: IconBuildingBank },
+  { to: '/investimentos', label: t.nav.investments, icon: IconPigMoney },
   { to: '/orcamento', label: t.nav.budget, icon: IconTargetArrow },
   { to: '/recorrentes', label: t.nav.recurring, icon: IconRepeat },
   { to: '/categorias', label: t.nav.categories, icon: IconCategory },
@@ -149,6 +159,22 @@ export function App() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/lancamentos" element={<TransactionsPage />} />
             <Route path="/contas" element={<AccountsPage />} />
+            <Route
+              path="/investimentos"
+              element={
+                <Suspense fallback={<Loader />}>
+                  <InvestmentsPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/investimentos/:id"
+              element={
+                <Suspense fallback={<Loader />}>
+                  <TituloPage />
+                </Suspense>
+              }
+            />
             <Route path="/orcamento" element={<BudgetPage />} />
             <Route path="/recorrentes" element={<RecurringPage />} />
             <Route path="/categorias" element={<CategoriesPage />} />

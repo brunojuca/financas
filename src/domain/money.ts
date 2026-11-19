@@ -48,3 +48,14 @@ export function centsFromTyped(raw: string, allowNegative = false): Cents | null
   const minusCount = (raw.match(/-/g) ?? []).length;
   return allowNegative && minusCount % 2 === 1 ? -cents : cents;
 }
+
+const percent = new Intl.NumberFormat('pt-BR', {
+  style: 'percent',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/** `0.1164` → `11,64%` */
+export function formatPercent(rate: number): string {
+  return percent.format(rate).replace(/\u00a0/g, ' ');
+}

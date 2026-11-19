@@ -1,0 +1,51 @@
+{
+  "TesouroLegado": [
+    {
+      "treasuryBondName": "Tesouro Selic 2029",
+      "redemptionProfitabilityFeeIndexerName": "SELIC + 0,0636%",
+      "unitaryRedemptionValue": 20305.76,
+      "unitaryInvestmentValue": 0,
+      "maturityDate": "2029-03-01T00:00",
+      "lastMarketPricingDate": "2026-11-18T18:00:02.723",
+      "startDate": "2026-11-19T09:30:00.000"
+    },
+    {
+      "treasuryBondName": "Tesouro Prefixado 2029",
+      "redemptionProfitabilityFeeIndexerName": "15,06%",
+      "unitaryRedemptionValue": 745.33,
+      "unitaryInvestmentValue": 746.96,
+      "maturityDate": "2029-01-01T00:00",
+      "lastMarketPricingDate": "2026-11-18T18:00:02.723",
+      "startDate": "2026-11-19T09:30:00.000"
+    },
+    {
+      "treasuryBondName": "Tesouro IPCA+ 2032",
+      "redemptionProfitabilityFeeIndexerName": "IPCA + 7,84%",
+      "unitaryRedemptionValue": 3105.18,
+      "unitaryInvestmentValue": 3124.96,
+      "maturityDate": "2032-08-15T00:00",
+      "lastMarketPricingDate": "2026-11-18T18:00:02.723",
+      "startDate": "2026-11-19T09:30:00.000"
+    },
+    {
+      "treasuryBondName": "Tesouro IPCA+ com Juros Semestrais 2035",
+      "redemptionProfitabilityFeeIndexerName": "IPCA + 7,85%",
+      "unitaryRedemptionValue": 4269.71,
+      "unitaryInvestmentValue": 0,
+      "maturityDate": "2035-05-15T00:00",
+      "lastMarketPricingDate": "2026-11-18T18:00:02.723",
+      "startDate": "2026-11-19T09:30:00.000"
+    }
+  ],
+  "Tesouro24x7": [
+    {
+      "treasuryBondName": "Tesouro Reserva 2036",
+      "redemptionProfitabilityFeeIndexerName": "SELIC",
+      "unitaryRedemptionValue": 11.237408,
+      "unitaryInvestmentValue": 11.237408,
+      "maturityDate": "2036-01-01T00:00",
+      "lastMarketPricingDate": "2026-11-18T00:03:34.013",
+      "startDate": null
+    }
+  ]
+}
