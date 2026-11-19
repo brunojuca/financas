@@ -39,8 +39,14 @@ export interface Transaction {
   /** Signed: positive = inflow, negative = outflow. */
   amountCents: Cents;
   accountId: string;
-  categoryId: string;
+  /** null = not categorized yet (shown as a pending issue). */
+  categoryId: string | null;
   subcategoryId: string | null;
+  /**
+   * Outlier (big sale, big purchase…): counts in account balances but not in budget,
+   * monthly income/expense totals or category charts. May stay uncategorized.
+   */
+  extraordinary: boolean;
   /** Shared by the two legs of a transfer between own accounts. */
   transferId: string | null;
   /** Set when generated from a recurring template. */

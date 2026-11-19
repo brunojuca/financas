@@ -14,16 +14,17 @@ import {
   Table,
   Text,
   TextInput,
+  Tooltip,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
-import { IconPlus, IconRepeat, IconSearch, IconTrash } from '@tabler/icons-react';
+import { IconCopy, IconPlus, IconRepeat, IconSearch, IconTrash } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 import { Money, MonthSwitcher, PageHeader } from '../../components/common';
 import { accountOptions, categoryOptions, pendingRecurringCount } from '../../components/options';
 import { isTransfer } from '../../domain/cashflow/summary';
-import { currentMonth, dateInMonth, formatDateBR, monthOf, parseIsoDate, todayIso } from '../../domain/dates';
+import { currentMonth, dateInMonth, formatDateBR, monthOf, todayIso } from '../../domain/dates';
 import type { Transaction, YearMonth } from '../../domain/types';
 import { t } from '../../i18n/pt-BR';
 import { deleteTransaction, generateRecurringForMonth } from '../../storage/repo';
@@ -55,7 +56,8 @@ function buildRows(
   for (const tx of data.transactions) {
     if (monthOf(tx.date) !== month) continue;
     if (accountId && tx.accountId !== accountId) continue;
-    if (categoryId && tx.categoryId !== categoryId) continue;
+    if (categoryId === UNCATEGORIZED ? tx.categoryId !== null : categoryId && tx.categoryId !== categoryId)
+      continue;
     if (query && !tx.description.toLocaleLowerCase('pt-BR').includes(query)) continue;
     const transfer = isTransfer(tx, data.categoryIndex);
     let accountLabel = accountName.get(tx.accountId) ?? '';
@@ -66,7 +68,9 @@ function buildRows(
       const otherName = other ? (accountName.get(other.accountId) ?? '') : '';
       accountLabel = tx.amountCents < 0 ? `${accountLabel} → ${otherName}` : `${otherName} → ${accountLabel}`;
     }
-    const category = data.categoryIndex.get(tx.categoryId)?.name ?? '';
+    const category = tx.categoryId
+      ? (data.categoryIndex.get(tx.categoryId)?.name ?? '')
+      : t.transactions.uncategorized;
     const sub = tx.subcategoryId ? data.categoryIndex.get(tx.subcategoryId)?.name : undefined;
     rows.push({
       tx,
@@ -82,12 +86,34 @@ function buildRows(
   return rows;
 }
 
+/** What the entry modal is showing. */
+type Editor = { kind: 'new' } | { kind: 'edit'; tx: Transaction } | { kind: 'duplicate'; tx: Transaction };
+
+const EDITOR_TITLE = {
+  new: t.transactions.new,
+  edit: t.transactions.edit,
+  duplicate: t.transactions.duplicateTitle,
+} as const;
+
+/** Filter value for transactions without category. */
+const UNCATEGORIZED = '__uncategorized__';
+
 function Badges({ row }: { row: Row }) {
   return (
     <>
       {row.tx.transferId && (
         <Badge size="xs" variant="light" color="gray">
           {t.transactions.transferBadge}
+        </Badge>
+      )}
+      {row.tx.categoryId === null && !row.isTransfer && (
+        <Badge size="xs" variant="light" color={row.tx.extraordinary ? 'yellow' : 'red'}>
+          {t.transactions.uncategorized}
+        </Badge>
+      )}
+      {row.tx.extraordinary && (
+        <Badge size="xs" variant="light" color="grape">
+          {t.transactions.extraordinary}
         </Badge>
       )}
       {row.tx.recurringId && (
@@ -105,7 +131,7 @@ export function TransactionsPage() {
   const [accountId, setAccountId] = useState<string | null>(null);
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [editing, setEditing] = useState<Transaction | null | 'new'>(null);
+  const [editor, setEditor] = useState<Editor | null>(null);
   const isMobile = useMediaQuery('(max-width: 48em)');
 
   const rows = useMemo(
@@ -126,7 +152,10 @@ export function TransactionsPage() {
   const outflow = counted.reduce((s, r) => s + Math.min(0, r.tx.amountCents), 0);
   const pending = pendingRecurringCount(data, month);
   const today = todayIso();
-  const defaultDate = monthOf(today) === month ? today : dateInMonth(month, parseIsoDate(today).day);
+  // The date picker opens on the month being viewed.
+  const calendarDate = monthOf(today) === month ? today : dateInMonth(month, 1);
+  const edit = (tx: Transaction) => setEditor({ kind: 'edit', tx });
+  const duplicate = (tx: Transaction) => setEditor({ kind: 'duplicate', tx });
 
   const confirmDelete = (tx: Transaction) =>
     modals.openConfirmModal({
@@ -146,7 +175,7 @@ export function TransactionsPage() {
     <>
       <PageHeader title={t.nav.transactions}>
         <MonthSwitcher value={month} onChange={setMonth} />
-        <Button leftSection={<IconPlus size={18} />} onClick={() => setEditing('new')}>
+        <Button leftSection={<IconPlus size={18} />} onClick={() => setEditor({ kind: 'new' })}>
           {t.transactions.new}
         </Button>
       </PageHeader>
@@ -172,7 +201,10 @@ export function TransactionsPage() {
         />
         <Select
           placeholder={t.transactions.category}
-          data={categoryOptions(data.categories, null, null, categoryId)}
+          data={[
+            { value: UNCATEGORIZED, label: t.transactions.uncategorized },
+            ...categoryOptions(data.categories, null, null, categoryId),
+          ]}
           value={categoryId}
           onChange={setCategoryId}
           clearable
@@ -204,7 +236,7 @@ export function TransactionsPage() {
       ) : isMobile ? (
         <Stack gap="xs">
           {rows.map((row) => (
-            <Paper key={row.tx.id} p="sm" onClick={() => setEditing(row.tx)} style={{ cursor: 'pointer' }}>
+            <Paper key={row.tx.id} p="sm" onClick={() => edit(row.tx)} style={{ cursor: 'pointer' }}>
               <Group justify="space-between" wrap="nowrap" align="flex-start">
                 <Stack gap={2} style={{ minWidth: 0 }}>
                   <Group gap={6}>
@@ -233,12 +265,12 @@ export function TransactionsPage() {
                 <Table.Th>{t.transactions.category}</Table.Th>
                 <Table.Th>{t.transactions.account}</Table.Th>
                 <Table.Th ta="right">{t.transactions.amount}</Table.Th>
-                <Table.Th w={50} />
+                <Table.Th w={80} />
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {rows.map((row) => (
-                <Table.Tr key={row.tx.id} onClick={() => setEditing(row.tx)} style={{ cursor: 'pointer' }}>
+                <Table.Tr key={row.tx.id} onClick={() => edit(row.tx)} style={{ cursor: 'pointer' }}>
                   <Table.Td>{formatDateBR(row.tx.date)}</Table.Td>
                   <Table.Td>
                     <Group gap={6}>
@@ -258,17 +290,31 @@ export function TransactionsPage() {
                     <Money cents={row.tx.amountCents} colored={!row.isTransfer || !!accountId} size="sm" />
                   </Table.Td>
                   <Table.Td>
-                    <ActionIcon
-                      variant="subtle"
-                      color="red"
-                      aria-label={t.common.delete}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        confirmDelete(row.tx);
-                      }}
-                    >
-                      <IconTrash size={16} />
-                    </ActionIcon>
+                    <Group gap={2} wrap="nowrap">
+                      <Tooltip label={t.transactions.duplicate}>
+                        <ActionIcon
+                          variant="subtle"
+                          aria-label={t.transactions.duplicate}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            duplicate(row.tx);
+                          }}
+                        >
+                          <IconCopy size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                      <ActionIcon
+                        variant="subtle"
+                        color="red"
+                        aria-label={t.common.delete}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          confirmDelete(row.tx);
+                        }}
+                      >
+                        <IconTrash size={16} />
+                      </ActionIcon>
+                    </Group>
                   </Table.Td>
                 </Table.Tr>
               ))}
@@ -278,32 +324,46 @@ export function TransactionsPage() {
       )}
 
       <Modal
-        opened={editing !== null}
-        onClose={() => setEditing(null)}
-        title={editing === 'new' ? t.transactions.new : t.transactions.edit}
+        opened={editor !== null}
+        onClose={() => setEditor(null)}
+        title={editor ? EDITOR_TITLE[editor.kind] : ''}
         fullScreen={isMobile}
         size="lg"
       >
-        {editing !== null && (
+        {editor !== null && (
           <Stack>
             <TransactionForm
+              // Remount when switching from editing to duplicating the same entry.
+              key={editor.kind}
               data={data}
-              editing={editing === 'new' ? null : editing}
-              defaultDate={defaultDate}
-              onDone={() => setEditing(null)}
+              editing={editor.kind === 'edit' ? editor.tx : null}
+              duplicateOf={editor.kind === 'duplicate' ? editor.tx : null}
+              calendarDate={calendarDate}
+              onDone={() => setEditor(null)}
             />
-            {editing !== 'new' && isMobile && (
-              <Button
-                variant="subtle"
-                color="red"
-                leftSection={<IconTrash size={16} />}
-                onClick={() => {
-                  setEditing(null);
-                  confirmDelete(editing);
-                }}
-              >
-                {t.common.delete}
-              </Button>
+            {editor.kind === 'edit' && (
+              <Group grow>
+                <Button
+                  variant="subtle"
+                  leftSection={<IconCopy size={16} />}
+                  onClick={() => duplicate(editor.tx)}
+                >
+                  {t.transactions.duplicate}
+                </Button>
+                {isMobile && (
+                  <Button
+                    variant="subtle"
+                    color="red"
+                    leftSection={<IconTrash size={16} />}
+                    onClick={() => {
+                      setEditor(null);
+                      confirmDelete(editor.tx);
+                    }}
+                  >
+                    {t.common.delete}
+                  </Button>
+                )}
+              </Group>
             )}
           </Stack>
         )}

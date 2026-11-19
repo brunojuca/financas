@@ -3,12 +3,14 @@ import { modals } from '@mantine/modals';
 import {
   IconDatabaseExport,
   IconDatabaseImport,
+  IconFileImport,
   IconFileSpreadsheet,
   IconFlask,
   IconTrash,
 } from '@tabler/icons-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useEffect, useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { PageHeader } from '../../components/common';
 import { downloadFile } from '../../components/download';
 import { currentMonth, formatDateBR, todayIso } from '../../domain/dates';
@@ -96,6 +98,14 @@ export function SettingsPage() {
               onClick={() => void exportCsv()}
             >
               {t.settings.exportCsv}
+            </Button>
+            <Button
+              variant="default"
+              leftSection={<IconFileImport size={18} />}
+              component={Link}
+              to="/importar"
+            >
+              {t.nav.import}
             </Button>
           </Group>
         </Section>

@@ -49,6 +49,7 @@ export function generateRecurring(
       accountId: template.accountId,
       categoryId: template.categoryId,
       subcategoryId: template.subcategoryId,
+      extraordinary: false,
       transferId: null,
       recurringId: template.id,
       recurringMonth: month,

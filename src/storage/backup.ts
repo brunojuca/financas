@@ -4,7 +4,8 @@ import type { Account, Budget, Category, RecurringTemplate, Transaction } from '
 import { db, META, setMeta } from './db';
 
 export const BACKUP_APP = 'financas';
-export const SCHEMA_VERSION = 1;
+/** v2: transactions gained `extraordinary` and may have `categoryId: null`. */
+export const SCHEMA_VERSION = 2;
 
 export interface BackupData {
   accounts: Account[];
@@ -85,8 +86,9 @@ export function parseBackup(raw: unknown): BackupFile {
       isStr(r.description) &&
       isInt(r.amountCents) &&
       isStr(r.accountId) &&
-      isStr(r.categoryId) &&
+      isNullableStr(r.categoryId) &&
       isNullableStr(r.subcategoryId) &&
+      (r.extraordinary === undefined || typeof r.extraordinary === 'boolean') &&
       isNullableStr(r.transferId) &&
       isNullableStr(r.recurringId),
   );
@@ -126,6 +128,7 @@ export async function restoreBackup(file: BackupFile): Promise<void> {
       await db.transactions.bulkPut(
         data.transactions.map((t) => ({
           ...t,
+          extraordinary: t.extraordinary ?? false, // v1 backups
           recurringMonth: t.recurringMonth ?? null,
           installment: t.installment ?? null,
         })),
@@ -152,7 +155,7 @@ export function transactionsToCsv(
 ): string {
   const accountName = new Map(accounts.map((a) => [a.id, a.name]));
   const categoryName = new Map(categories.map((c) => [c.id, c.name]));
-  const header = ['Data', 'Descrição', 'Valor', 'Conta', 'Categoria', 'Subcategoria'];
+  const header = ['Data', 'Descrição', 'Valor', 'Conta', 'Categoria', 'Subcategoria', 'Extraordinário'];
   const rows = [...transactions]
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
     .map((t) => [
@@ -160,8 +163,9 @@ export function transactionsToCsv(
       t.description,
       formatDecimal(t.amountCents),
       accountName.get(t.accountId) ?? '',
-      categoryName.get(t.categoryId) ?? '',
+      t.categoryId ? (categoryName.get(t.categoryId) ?? '') : '',
       t.subcategoryId ? (categoryName.get(t.subcategoryId) ?? '') : '',
+      t.extraordinary ? 'Sim' : '',
     ]);
-  return '﻿' + [header, ...rows].map((r) => r.map(csvCell).join(';')).join('\r\n') + '\r\n';
+  return '\ufeff' + [header, ...rows].map((r) => r.map(csvCell).join(';')).join('\r\n') + '\r\n';
 }

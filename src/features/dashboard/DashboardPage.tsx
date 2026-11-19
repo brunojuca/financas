@@ -1,5 +1,6 @@
 import { Alert, Button, Center, Group, Loader, Paper, SimpleGrid, Stack, Text, Title } from '@mantine/core';
-import { IconCloudUpload, IconRepeat } from '@tabler/icons-react';
+import { IconAlertCircle, IconCloudUpload, IconRepeat } from '@tabler/icons-react';
+import { Link } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo, useState } from 'react';
 import { Chart, type ChartOption } from '../../components/Chart';
@@ -134,6 +135,7 @@ export function DashboardPage() {
   const total = [...balances.values()].reduce((s, v) => s + v, 0);
   const totals = monthTotals(data.transactions, data.categoryIndex, month);
   const pending = pendingRecurringCount(data, month);
+  const uncategorized = data.transactions.filter((tx) => tx.categoryId === null && !tx.extraordinary).length;
   const showBackupReminder =
     data.transactions.length > 0 && (daysSinceBackup === null || daysSinceBackup >= BACKUP_REMINDER_DAYS);
 
@@ -158,6 +160,16 @@ export function DashboardPage() {
             </Group>
           </Alert>
         )}
+        {uncategorized > 0 && (
+          <Alert color="red" icon={<IconAlertCircle size={18} />}>
+            <Group justify="space-between">
+              <Text size="sm">{t.dashboard.issuesAlert(uncategorized)}</Text>
+              <Button size="xs" variant="light" color="red" component={Link} to="/pendencias">
+                {t.dashboard.reviewIssues}
+              </Button>
+            </Group>
+          </Alert>
+        )}
         {pending > 0 && (
           <Alert icon={<IconRepeat size={18} />}>
             <Group justify="space-between">
@@ -175,6 +187,11 @@ export function DashboardPage() {
           <Stat label={t.dashboard.expense} cents={totals.expense} colored={false} />
           <Stat label={t.dashboard.net} cents={totals.net} />
         </SimpleGrid>
+        {totals.extraordinary !== 0 && (
+          <Text size="sm" c="dimmed">
+            {t.dashboard.extraordinaryNote} <Money cents={totals.extraordinary} fw={600} />
+          </Text>
+        )}
 
         <SimpleGrid cols={{ base: 1, lg: 2 }}>
           <ChartCard title={t.dashboard.incomeVsExpense}>

@@ -69,6 +69,15 @@ Do not add dependencies beyond these without asking the user first.
   Budgets and recurring templates store positive amounts; the sign comes from the category kind.
 - Transfers are two transactions sharing a `transferId` (−X source, +X destination) under the seeded transfer category.
   They never count in income, expense or budget totals.
+- A transaction may be **uncategorized** (`categoryId: null`, e.g. from CSV import). It is a red error on the
+  Pendências screen and stays out of the budget. Missing subcategory (when the category has some) is a yellow alert.
+- **Extraordinary** transactions (`extraordinary: true`: big one-off sales/purchases) count in account balances but
+  not in budget, monthly income/expense or category charts; they may stay uncategorized (yellow alert only).
+- **CSV import** (`src/domain/import/`): columns found by header name (Data, Descrição, Valor, Conta, Categoria,
+  Subcategoria, optional Extraordinário); rows missing date/description/value/account are rejected. Unknown accounts
+  and categories are created or linked to existing ones by the user. Transfer-category rows with the same date and
+  opposite values in different accounts are paired into one transfer. Rows already in the app are skipped.
+  Export uses the same layout, so export → import round-trips.
 - Accounts and categories that have transactions are **archived, never deleted**.
 - First run asks: start with the default seed, import a backup, or load demo data.
 - Credit-card statement closing/due dates are a later feature; the `creditCard` account type leaves room for it.

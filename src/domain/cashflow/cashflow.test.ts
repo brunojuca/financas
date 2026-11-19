@@ -35,6 +35,7 @@ function tx(date: string, amountCents: number, accountId: string, category: stri
     accountId,
     categoryId: top(category).id,
     subcategoryId: null,
+    extraordinary: false,
     transferId: null,
     recurringId: null,
     recurringMonth: null,
@@ -105,7 +106,30 @@ describe('summary', () => {
       income: 500000,
       expense: 45000 + 25000 - 5000 + 9500,
       net: 500000 - 74500,
+      extraordinary: 0,
     });
+  });
+
+  it('keeps extraordinary and uncategorized entries apart', () => {
+    const sale = {
+      ...tx('2026-10-20', 2000000, checking.id, 'Lazer'),
+      categoryId: null,
+      extraordinary: true,
+    };
+    const bigBuy = { ...tx('2026-10-21', -800000, card.id, 'Lazer'), extraordinary: true };
+    const loose = { ...tx('2026-10-22', -1000, card.id, 'Lazer'), categoryId: null };
+    const all = [...transactions, sale, bigBuy, loose];
+    // Extraordinary: out of income/expense, reported apart. Uncategorized: counted by sign.
+    expect(monthTotals(all, index, '2026-10')).toEqual({
+      income: 500000,
+      expense: 74500 + 1000,
+      net: 500000 - 75500,
+      extraordinary: 2000000 - 800000,
+    });
+    expect(expensesByCategory(all, index, '2026-10').map((c) => c.amount)).toEqual([65000, 9500]);
+    expect(budgetReport('2026-10', categories, index, [], all).total.actual).toBe(500000 - 74500);
+    // …but balances include everything.
+    expect(accountBalances(all).get(checking.id)).toBe(100000 + 500000 - 30000 + 2000000);
   });
 
   it('builds a monthly series', () => {

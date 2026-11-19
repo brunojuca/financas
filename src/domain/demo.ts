@@ -76,6 +76,7 @@ export function createDemoData(lastMonth: YearMonth, newId: () => string): DemoD
       accountId: checking.id,
       categoryId: transferCategory.id,
       subcategoryId: null,
+      extraordinary: false,
       transferId: null,
       recurringId: null,
       recurringMonth: null,
@@ -96,6 +97,22 @@ export function createDemoData(lastMonth: YearMonth, newId: () => string): DemoD
     ['Transporte por app', 'Transporte', 'Privado', 15, 60],
   ];
 
+  // An outlier: big one-off sale, flagged extraordinary and left uncategorized on purpose.
+  transactions.push({
+    id: newId(),
+    date: dateInMonth(addMonths(lastMonth, -2), 18),
+    description: 'Venda do carro antigo',
+    amountCents: 18_000_00,
+    accountId: checking.id,
+    categoryId: null,
+    subcategoryId: null,
+    extraordinary: true,
+    transferId: null,
+    recurringId: null,
+    recurringMonth: null,
+    installment: null,
+  });
+
   for (const month of months) {
     transactions.push(...generateRecurring(recurring, transactions, index, month, newId));
     for (const [description, c, s, min, max] of variable) {
@@ -108,6 +125,7 @@ export function createDemoData(lastMonth: YearMonth, newId: () => string): DemoD
         accountId: card.id,
         categoryId: cat(c).id,
         subcategoryId: sub(c, s).id,
+        extraordinary: false,
         transferId: null,
         recurringId: null,
         recurringMonth: null,

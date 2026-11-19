@@ -20,6 +20,17 @@ export class FinancasDb extends Dexie {
       recurring: 'id',
       meta: 'key',
     });
+    // v2: transactions may be uncategorized and carry an `extraordinary` flag.
+    this.version(2)
+      .stores({})
+      .upgrade((tx) =>
+        tx
+          .table('transactions')
+          .toCollection()
+          .modify((t: Record<string, unknown>) => {
+            if (typeof t.extraordinary !== 'boolean') t.extraordinary = false;
+          }),
+      );
   }
 }
 
@@ -28,6 +39,10 @@ export const db = new FinancasDb();
 export const META = {
   initialized: 'initialized',
   lastBackupAt: 'lastBackupAt',
+  /** Account of the last entry saved from the transaction form (default for the next one). */
+  lastAccountId: 'lastAccountId',
+  /** Date of the last entry saved from the transaction form (default for the next one). */
+  lastDate: 'lastDate',
 } as const;
 
 export async function getMeta(key: string): Promise<string | undefined> {

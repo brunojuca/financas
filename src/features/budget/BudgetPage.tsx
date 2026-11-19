@@ -5,7 +5,6 @@ import {
   Divider,
   Group,
   Loader,
-  NumberInput,
   Paper,
   Progress,
   SimpleGrid,
@@ -17,9 +16,9 @@ import { notifications } from '@mantine/notifications';
 import { IconCopy } from '@tabler/icons-react';
 import { useState } from 'react';
 import { Money, MonthSwitcher, PageHeader } from '../../components/common';
+import { MoneyInput } from '../../components/MoneyInput';
 import { budgetReport, type BudgetRow } from '../../domain/cashflow/budget';
 import { currentMonth } from '../../domain/dates';
-import { toCents } from '../../domain/money';
 import type { CategoryKind, YearMonth } from '../../domain/types';
 import { t } from '../../i18n/pt-BR';
 import { semantic } from '../../theme';
@@ -27,27 +26,19 @@ import { copyBudgetFromPreviousMonth, setBudget } from '../../storage/repo';
 import { useFinanceData } from '../../storage/useFinanceData';
 
 function BudgetInput({ month, row }: { month: YearMonth; row: BudgetRow }) {
-  const stored = Math.abs(row.budget) / 100;
-  const [value, setValue] = useState<number | string>(stored || '');
+  const [value, setValue] = useState<number | null>(Math.abs(row.budget) || null);
   const commit = () => {
-    const cents = toCents(Number(value) || 0);
+    const cents = value ?? 0;
     if (cents !== Math.abs(row.budget)) void setBudget(month, row.category.id, cents);
   };
   return (
-    <NumberInput
+    <MoneyInput
       aria-label={`${t.budget.planned}: ${row.category.name}`}
       placeholder={t.budget.noBudget}
       value={value}
       onChange={setValue}
       onBlur={commit}
       onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-      prefix="R$ "
-      decimalSeparator=","
-      thousandSeparator="."
-      decimalScale={2}
-      allowNegative={false}
-      hideControls
-      inputMode="decimal"
       w={150}
       size="sm"
     />

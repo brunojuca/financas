@@ -1,7 +1,7 @@
 import { monthOf } from '../dates';
 import { signedAmount } from '../money';
 import type { Budget, Category, Cents, Transaction, YearMonth } from '../types';
-import { isTransfer, type CategoryIndex } from './summary';
+import { isRegular, type CategoryIndex } from './summary';
 
 export function budgetId(month: YearMonth, categoryId: string): string {
   return `${month}:${categoryId}`;
@@ -27,7 +27,7 @@ export interface BudgetReport {
 
 /**
  * Budget vs actual per top-level income/expense category for a month (spreadsheet `Orçamento` sheet).
- * Transfers never count. Archived categories appear only if they have a budget or activity that month.
+ * Transfers, extraordinary and uncategorized entries never count. Archived categories appear only if they have a budget or activity that month.
  */
 export function budgetReport(
   month: YearMonth,
@@ -38,7 +38,7 @@ export function budgetReport(
 ): BudgetReport {
   const actualByCategory = new Map<string, Cents>();
   for (const t of transactions) {
-    if (monthOf(t.date) !== month || isTransfer(t, categoryIndex)) continue;
+    if (monthOf(t.date) !== month || !isRegular(t, categoryIndex) || t.categoryId === null) continue;
     actualByCategory.set(t.categoryId, (actualByCategory.get(t.categoryId) ?? 0) + t.amountCents);
   }
   const budgetByCategory = new Map(

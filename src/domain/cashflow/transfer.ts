@@ -23,6 +23,7 @@ export function buildTransfer(input: TransferInput, newId: () => string): [Trans
     description: input.description,
     categoryId: input.transferCategoryId,
     subcategoryId: null,
+    extraordinary: false,
     transferId,
     recurringId: null,
     recurringMonth: null,

@@ -11,6 +11,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { HashRouter } from 'react-router-dom';
 import { App } from './App';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { t } from './i18n/pt-BR';
 import { theme } from './theme';
 
@@ -21,7 +22,9 @@ createRoot(document.getElementById('root')!).render(
         <ModalsProvider labels={{ confirm: t.common.confirm, cancel: t.common.cancel }}>
           <Notifications position="top-center" />
           <HashRouter>
-            <App />
+            <ErrorBoundary>
+              <App />
+            </ErrorBoundary>
           </HashRouter>
         </ModalsProvider>
       </DatesProvider>

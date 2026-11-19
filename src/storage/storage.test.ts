@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { findTransferCategory } from '../domain/seed';
 import { BackupError, createBackup, parseBackup, restoreBackup, transactionsToCsv } from './backup';
+import { isValidRow, parseTransactionsCsv } from '../domain/import/csv';
+import { buildImportPlan, summarizeSource, suggestMappings } from '../domain/import/plan';
 import { db } from './db';
 import {
   clearAllData,
@@ -10,6 +12,8 @@ import {
   initializeWithSeed,
   loadDemoData,
   removeAccount,
+  applyImportPlan,
+  newId,
   removeCategory,
   saveTransfer,
   setBudget,
@@ -138,9 +142,58 @@ describe('backup', () => {
       await db.accounts.toArray(),
       await db.categories.toArray(),
     );
-    expect(csv.startsWith('﻿')).toBe(true);
+    expect(csv.startsWith('\ufeff')).toBe(true);
     const lines = csv.slice(1).trimEnd().split('\r\n');
-    expect(lines[0]).toBe('Data;Descrição;Valor;Conta;Categoria;Subcategoria');
-    expect(lines[1]).toMatch(/^01\/06\/2026;Saldo inicial;5\.200,00;Conta corrente;Transferências;$/);
+    expect(lines[0]).toBe('Data;Descrição;Valor;Conta;Categoria;Subcategoria;Extraordinário');
+    expect(lines[1]).toMatch(/^01\/06\/2026;Saldo inicial;5\.200,00;Conta corrente;Transferências;;$/);
+  });
+});
+
+describe('csv import', () => {
+  it('round-trips an export into a fresh install (transfers re-paired, extraordinary kept)', async () => {
+    await loadDemoData('2026-11');
+    const original = await db.transactions.toArray();
+    const csv = transactionsToCsv(original, await db.accounts.toArray(), await db.categories.toArray());
+
+    await clearAllData();
+    await initializeWithSeed();
+    const rows = parseTransactionsCsv(csv).rows;
+    expect(rows.every(isValidRow)).toBe(true);
+    const valid = rows.filter(isValidRow);
+    const [accounts, categories] = [await db.accounts.toArray(), await db.categories.toArray()];
+    const mappings = suggestMappings(summarizeSource(valid), accounts, categories);
+    expect(Object.values(mappings.accounts).every((m) => m.action === 'existing')).toBe(true);
+    const plan = buildImportPlan(
+      valid,
+      mappings,
+      { uncategorized: 'keep', skipDuplicates: true },
+      { accounts, categories, transactions: [] },
+      newId,
+    );
+    await applyImportPlan(plan);
+
+    const imported = await db.transactions.toArray();
+    expect(imported).toHaveLength(original.length);
+    expect(plan.categories).toEqual([]);
+    const pairs = (list: typeof original) => new Set(list.map((t) => t.transferId).filter(Boolean)).size;
+    expect(pairs(imported)).toBe(pairs(original));
+    // Only the opening balance is a lone transfer-category row.
+    expect(plan.stats.unpairedTransfers).toBe(1);
+    expect(imported.filter((t) => t.extraordinary)).toHaveLength(
+      original.filter((t) => t.extraordinary).length,
+    );
+  });
+});
+
+describe('backup migration', () => {
+  it('reads version 1 backups (no extraordinary flag)', async () => {
+    await loadDemoData('2026-11');
+    const backup = await createBackup();
+    const v1 = JSON.parse(JSON.stringify({ ...backup, schemaVersion: 1 }));
+    for (const t of v1.data.transactions) delete t.extraordinary;
+    await clearAllData();
+    await restoreBackup(parseBackup(v1));
+    const restored = await db.transactions.toArray();
+    expect(restored.every((t) => typeof t.extraordinary === 'boolean')).toBe(true);
   });
 });

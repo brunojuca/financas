@@ -35,3 +35,16 @@ export function sumCents(values: Iterable<Cents>): Cents {
   for (const v of values) total += v;
   return total;
 }
+
+/**
+ * Cents-first typing ("cash register" style): every digit typed shifts in from the right,
+ * so typing `1`, `2`, `3`, `4` reads as 0,01 → 0,12 → 1,23 → 12,34. Non-digits are ignored.
+ * With `allowNegative`, an odd number of `-` signs makes the value negative (typing `-` toggles it).
+ * Returns null when the value is zero or empty, so erasing every digit clears the field.
+ */
+export function centsFromTyped(raw: string, allowNegative = false): Cents | null {
+  const cents = Number(raw.replace(/\D/g, '').replace(/^0+/, '').slice(0, 13) || '0');
+  if (cents === 0) return null;
+  const minusCount = (raw.match(/-/g) ?? []).length;
+  return allowNegative && minusCount % 2 === 1 ? -cents : cents;
+}

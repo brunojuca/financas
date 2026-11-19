@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatBRL, formatDecimal, signedAmount, toCents } from './money';
+import { centsFromTyped, formatBRL, formatDecimal, signedAmount, toCents } from './money';
 
 describe('money', () => {
   it('converts reais to integer cents without float drift', () => {
@@ -18,5 +18,33 @@ describe('money', () => {
     expect(signedAmount('income', 1000)).toBe(1000);
     expect(signedAmount('expense', 1000)).toBe(-1000);
     expect(signedAmount('expense', -1000)).toBe(-1000);
+  });
+});
+
+describe('centsFromTyped', () => {
+  it('shifts typed digits in from the cents side', () => {
+    expect(centsFromTyped('1')).toBe(1);
+    expect(centsFromTyped('R$ 0,012')).toBe(12);
+    expect(centsFromTyped('R$ 0,123')).toBe(123);
+    expect(centsFromTyped('R$ 1,234')).toBe(1234);
+    expect(centsFromTyped('R$ 12.345,678')).toBe(12345678);
+  });
+
+  it('removes the last digit on backspace and clears at zero', () => {
+    expect(centsFromTyped('R$ 12,3')).toBe(123);
+    expect(centsFromTyped('R$ 0,0')).toBeNull();
+    expect(centsFromTyped('')).toBeNull();
+    expect(centsFromTyped('R$ ')).toBeNull();
+  });
+
+  it('reads pasted amounts', () => {
+    expect(centsFromTyped('1.234,56')).toBe(123456);
+  });
+
+  it('toggles the sign with "-" only when negatives are allowed', () => {
+    expect(centsFromTyped('R$ 1,00-', true)).toBe(-100);
+    expect(centsFromTyped('-R$ 1,00-', true)).toBe(100);
+    expect(centsFromTyped('-R$ 1,005', true)).toBe(-1005);
+    expect(centsFromTyped('R$ 1,00-')).toBe(100);
   });
 });

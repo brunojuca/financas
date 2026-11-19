@@ -11,6 +11,8 @@ export const t = {
     recurring: 'Recorrentes',
     categories: 'Categorias',
     settings: 'Configurações',
+    import: 'Importar CSV',
+    issues: 'Pendências',
     toggleMenu: 'Abrir menu',
     toggleTheme: 'Alternar tema claro/escuro',
   },
@@ -54,6 +56,12 @@ export const t = {
     expense: 'Despesas',
     transfer: 'Transferências',
   } satisfies Record<CategoryKind, string>,
+  crash: {
+    title: 'Algo deu errado nesta tela',
+    text: 'Seus dados estão salvos no navegador e não foram afetados. Recarregue a página para continuar.',
+    reload: 'Recarregar',
+    details: 'Detalhes técnicos',
+  },
   welcome: {
     title: 'Bem-vindo ao Finanças',
     intro:
@@ -78,6 +86,9 @@ export const t = {
     balanceHistory: 'Evolução do saldo total',
     accounts: 'Saldo por conta',
     noExpenses: 'Nenhuma despesa neste mês.',
+    extraordinaryNote: 'Extraordinários no mês (fora de receitas e despesas):',
+    issuesAlert: (n: number) => (n === 1 ? '1 lançamento sem categoria.' : `${n} lançamentos sem categoria.`),
+    reviewIssues: 'Revisar',
     pendingRecurring: (n: number) =>
       n === 1
         ? '1 lançamento recorrente ainda não foi gerado neste mês.'
@@ -90,7 +101,11 @@ export const t = {
   transactions: {
     new: 'Novo lançamento',
     edit: 'Editar lançamento',
+    duplicate: 'Duplicar',
+    duplicateTitle: 'Duplicar lançamento',
     date: 'Data',
+    datePlaceholder: 'dd/mm/aaaa',
+    today: 'Hoje',
     description: 'Descrição',
     amount: 'Valor',
     account: 'Conta',
@@ -99,6 +114,10 @@ export const t = {
     category: 'Categoria',
     subcategory: 'Subcategoria',
     type: 'Tipo',
+    extraordinary: 'Extraordinário',
+    extraordinaryHint:
+      'Fora do comum (venda ou compra grande). Conta no saldo, mas não no orçamento nem nos gráficos de receitas e despesas. Pode ficar sem categoria.',
+    uncategorized: 'Sem categoria',
     refund: 'Estorno / devolução',
     refundHint: 'Valor volta para a conta e reduz a despesa da categoria.',
     search: 'Buscar descrição',
@@ -156,7 +175,7 @@ export const t = {
     actual: 'Realizado',
     difference: 'Diferença',
     result: 'Resultado planejado x realizado',
-    hint: 'Diferença positiva = melhor que o planejado. Transferências não entram no orçamento.',
+    hint: 'Diferença positiva = melhor que o planejado. Transferências, extraordinários e lançamentos sem categoria não entram no orçamento.',
     noBudget: 'sem orçamento',
   },
   recurring: {
@@ -218,6 +237,78 @@ export const t = {
     privacyTitle: 'Privacidade',
     privacyText:
       'Este app funciona inteiramente no seu navegador. Não há servidor, conta, rastreamento ou análise de uso. Seus dados nunca saem deste dispositivo, a não ser pelos arquivos que você mesmo exportar.',
+  },
+  import: {
+    intro:
+      'Importe lançamentos de uma planilha (CSV) com as colunas Data, Descrição, Valor, Conta, Categoria e Subcategoria. Separador tab, ponto e vírgula ou vírgula. Valores negativos são saídas.',
+    steps: { file: 'Arquivo', accounts: 'Contas', categories: 'Categorias', review: 'Revisão' },
+    chooseFile: 'Escolher arquivo CSV',
+    fileSummary: (valid: number, rejected: number) =>
+      `${valid} linhas válidas` + (rejected ? `, ${rejected} com problema (não serão importadas)` : ''),
+    missingColumns: (cols: string) => `Colunas obrigatórias não encontradas: ${cols}`,
+    noValidRows: 'Nenhuma linha válida encontrada.',
+    rejectedTitle: 'Linhas que não serão importadas',
+    line: 'Linha',
+    problem: 'Problema',
+    problems: {
+      date: 'data inválida',
+      description: 'sem descrição',
+      amount: 'valor inválido',
+      account: 'sem conta',
+    },
+    accountsIntro:
+      'Para cada conta do arquivo, crie uma nova ou vincule a uma conta existente. Contas com o mesmo nome já vêm vinculadas.',
+    categoriesIntro:
+      'Para cada categoria do arquivo, crie uma nova ou vincule a uma existente. Faça o mesmo com as subcategorias. "Transferências" é vinculada à categoria de transferências entre contas.',
+    inFile: 'No arquivo',
+    rows: (n: number) => (n === 1 ? '1 lançamento' : `${n} lançamentos`),
+    createNew: 'Criar nova',
+    linkTo: 'Vincular a existente',
+    drop: 'Ignorar subcategoria',
+    newName: 'Nome',
+    kind: 'Tipo',
+    subcategoriesOf: (name: string) => `Subcategorias de ${name}`,
+    uncategorizedTitle: 'Lançamentos sem categoria',
+    uncategorizedKeep: 'Importar sem categoria (aparecem em vermelho em Pendências para você categorizar)',
+    uncategorizedExtraordinary:
+      'Marcar como extraordinários (ficam fora do orçamento; aparecem em amarelo em Pendências)',
+    skipDuplicates: 'Pular lançamentos que já existem (mesma data, valor, conta e descrição)',
+    summary: 'Resumo',
+    stats: {
+      imported: 'Lançamentos a importar',
+      transfersPaired: 'Transferências pareadas',
+      unpairedTransfers: 'Transferências sem par (importadas como lançamento avulso)',
+      uncategorized: 'Sem categoria',
+      extraordinary: 'Extraordinários',
+      duplicatesSkipped: 'Duplicados ignorados',
+      newAccounts: 'Contas novas',
+      newCategories: 'Categorias e subcategorias novas',
+    },
+    unpairedLines: (lines: string) => `Linhas: ${lines}`,
+    back: 'Voltar',
+    next: 'Próximo',
+    confirm: 'Importar',
+    done: (n: number) => (n === 1 ? '1 lançamento importado' : `${n} lançamentos importados`),
+    nothing: 'Nada para importar.',
+    backupFirst: 'Dica: exporte um backup antes de importar, para poder desfazer.',
+  },
+  issues: {
+    intro:
+      'Lançamentos que precisam de atenção. Em vermelho: sem categoria (não entram no orçamento). Em amarelo: sugestões opcionais.',
+    errors: 'Erros',
+    warnings: 'Alertas',
+    noErrors: 'Nenhum erro: todos os lançamentos têm categoria.',
+    noWarnings: 'Nenhum alerta.',
+    codes: {
+      uncategorized: 'Sem categoria',
+      uncategorizedExtraordinary: 'Extraordinário sem categoria',
+      missingSubcategory: 'Sem subcategoria',
+    },
+    pickCategory: 'Escolher categoria',
+    pickSubcategory: 'Escolher subcategoria',
+    markExtraordinary: 'Marcar como extraordinário',
+    unmarkExtraordinary: 'Desmarcar extraordinário',
+    edit: 'Editar lançamento',
   },
 } as const;
 

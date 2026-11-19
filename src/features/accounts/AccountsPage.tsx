@@ -7,7 +7,6 @@ import {
   Loader,
   Menu,
   Modal,
-  NumberInput,
   Paper,
   Select,
   SimpleGrid,
@@ -23,8 +22,8 @@ import { notifications } from '@mantine/notifications';
 import { IconArchive, IconDots, IconPencil, IconPlus, IconRestore } from '@tabler/icons-react';
 import { useState } from 'react';
 import { Money, PageHeader } from '../../components/common';
+import { MoneyInput } from '../../components/MoneyInput';
 import { accountBalances } from '../../domain/cashflow/summary';
-import { toCents } from '../../domain/money';
 import type { Account, AccountType } from '../../domain/types';
 import { t } from '../../i18n/pt-BR';
 import { db } from '../../storage/db';
@@ -46,7 +45,8 @@ function AccountForm({
     initialValues: {
       name: editing?.name ?? '',
       type: (editing?.type ?? 'checking') as AccountType,
-      openingBalance: 0 as number | string,
+      /** Cents; may be negative (debt). */
+      openingBalance: null as number | null,
     },
     validate: { name: (v) => (v.trim() ? null : t.common.required) },
   });
@@ -59,7 +59,7 @@ function AccountForm({
         archived: editing?.archived ?? false,
         order: editing?.order ?? nextOrder,
       },
-      editing ? 0 : toCents(Number(v.openingBalance) || 0),
+      editing ? 0 : (v.openingBalance ?? 0),
     );
     onDone();
   };
@@ -69,15 +69,10 @@ function AccountForm({
         <TextInput label={t.accounts.name} data-autofocus {...form.getInputProps('name')} />
         <Select label={t.accounts.type} data={TYPES} allowDeselect={false} {...form.getInputProps('type')} />
         {!editing && (
-          <NumberInput
+          <MoneyInput
             label={t.accounts.openingBalance}
             description={t.accounts.openingBalanceHint}
-            prefix="R$ "
-            decimalSeparator=","
-            thousandSeparator="."
-            decimalScale={2}
-            fixedDecimalScale
-            hideControls
+            allowNegative
             {...form.getInputProps('openingBalance')}
           />
         )}

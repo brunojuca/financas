@@ -24,10 +24,11 @@ import { notifications } from '@mantine/notifications';
 import { IconPencil, IconPlayerPlay, IconPlus, IconTrash } from '@tabler/icons-react';
 import { useState } from 'react';
 import { Money, MonthSwitcher, PageHeader } from '../../components/common';
+import { MoneyInput } from '../../components/MoneyInput';
 import { accountOptions, categoryOptions, pendingRecurringCount } from '../../components/options';
 import { isDueIn, lastMonthOf } from '../../domain/cashflow/recurring';
 import { currentMonth, formatMonthLong, formatMonthShort, monthsBetween } from '../../domain/dates';
-import { fromCents, signedAmount, toCents } from '../../domain/money';
+import { signedAmount } from '../../domain/money';
 import type { RecurringTemplate, YearMonth } from '../../domain/types';
 import { t } from '../../i18n/pt-BR';
 import { deleteRecurring, generateRecurringForMonth, newId, saveRecurring } from '../../storage/repo';
@@ -40,7 +41,8 @@ const fromPicker = (v: string | null) => (v ? v.slice(0, 7) : null);
 interface Values {
   kind: 'expense' | 'income';
   description: string;
-  amount: number | string;
+  /** Cents. */
+  amount: number | null;
   accountId: string | null;
   categoryId: string | null;
   subcategoryId: string | null;
@@ -70,7 +72,7 @@ function RecurringForm({
     initialValues: {
       kind,
       description: editing?.description ?? '',
-      amount: editing ? fromCents(editing.amountCents) : '',
+      amount: editing?.amountCents ?? null,
       accountId: editing?.accountId ?? data.accounts.find((a) => !a.archived)?.id ?? null,
       categoryId: editing?.categoryId ?? null,
       subcategoryId: editing?.subcategoryId ?? null,
@@ -83,7 +85,7 @@ function RecurringForm({
     },
     validate: {
       description: (v) => (v.trim() ? null : t.common.required),
-      amount: (v) => (typeof v === 'number' && v > 0 ? null : t.transactions.amountPositive),
+      amount: (v) => (v !== null && v > 0 ? null : t.transactions.amountPositive),
       accountId: (v) => (v ? null : t.common.required),
       categoryId: (v) => (v ? null : t.common.required),
       dayOfMonth: (v) => (Number(v) >= 1 && Number(v) <= 31 ? null : t.common.required),
@@ -102,7 +104,7 @@ function RecurringForm({
     await saveRecurring({
       id: editing?.id ?? newId(),
       description: v.description.trim(),
-      amountCents: toCents(Number(v.amount)),
+      amountCents: v.amount!,
       accountId: v.accountId!,
       categoryId: v.categoryId!,
       subcategoryId: v.subcategoryId,
@@ -134,16 +136,8 @@ function RecurringForm({
           {...form.getInputProps('description')}
         />
         <Group grow align="flex-start">
-          <NumberInput
+          <MoneyInput
             label={t.transactions.amount}
-            prefix="R$ "
-            decimalSeparator=","
-            thousandSeparator="."
-            decimalScale={2}
-            fixedDecimalScale
-            allowNegative={false}
-            hideControls
-            inputMode="decimal"
             key={form.key('amount')}
             {...form.getInputProps('amount')}
           />

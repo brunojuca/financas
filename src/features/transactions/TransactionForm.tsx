@@ -1,22 +1,29 @@
 import {
+  Autocomplete,
   Button,
   Checkbox,
   Group,
-  NumberInput,
   SegmentedControl,
   Select,
+  SimpleGrid,
   Stack,
-  TextInput,
+  type ComboboxParsedItem,
+  type OptionsFilter,
 } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
+import { useMemo } from 'react';
+import { MoneyInput } from '../../components/MoneyInput';
 import { accountOptions, categoryOptions } from '../../components/options';
-import { isIsoDate } from '../../domain/dates';
-import { fromCents, signedAmount, toCents } from '../../domain/money';
+import { descriptionSuggestions } from '../../domain/cashflow/suggestions';
+import { isIsoDate, todayIso } from '../../domain/dates';
+import { normalizeName } from '../../domain/import/csv';
+import { signedAmount } from '../../domain/money';
 import { findTransferCategory } from '../../domain/seed';
 import type { IsoDate, Transaction } from '../../domain/types';
 import { t } from '../../i18n/pt-BR';
+import { META, setMeta } from '../../storage/db';
 import { deleteTransaction, newId, saveTransaction, saveTransfer } from '../../storage/repo';
 import type { FinanceData } from '../../storage/useFinanceData';
 
@@ -25,90 +32,110 @@ type Mode = 'expense' | 'income' | 'transfer' | 'adjustment';
 
 interface Values {
   mode: Mode;
-  date: IsoDate;
+  /** New entries start with the date of the last one saved (empty the first time); "Hoje" sets today. */
+  date: IsoDate | null;
   description: string;
-  amount: number | string;
+  /** Cents; positive except in adjustment mode. */
+  amount: number | null;
   accountId: string | null;
   toAccountId: string | null;
   categoryId: string | null;
   subcategoryId: string | null;
   refund: boolean;
+  extraordinary: boolean;
 }
 
-function initialValues(data: FinanceData, editing: Transaction | null, defaultDate: IsoDate): Values {
-  const firstAccount = data.accounts.find((a) => !a.archived)?.id ?? null;
-  if (!editing) {
+/** The account of the last entry saved from this form, else the first active one. */
+function defaultAccount(data: FinanceData): string | null {
+  const active = data.accounts.filter((a) => !a.archived);
+  return (active.find((a) => a.id === data.lastAccountId) ?? active[0])?.id ?? null;
+}
+
+/** Blank values for a new entry, or the values of `source` (entry being edited or duplicated). */
+function initialValues(data: FinanceData, source: Transaction | null): Values {
+  if (!source) {
     return {
       mode: 'expense',
-      date: defaultDate,
+      date: isIsoDate(data.lastDate) ? data.lastDate : null,
       description: '',
-      amount: '',
-      accountId: firstAccount,
+      amount: null,
+      accountId: defaultAccount(data),
       toAccountId: null,
       categoryId: null,
       subcategoryId: null,
       refund: false,
+      extraordinary: false,
     };
   }
-  if (editing.transferId) {
-    const legs = data.transactions.filter((x) => x.transferId === editing.transferId);
-    const from = legs.find((x) => x.amountCents < 0) ?? editing;
+  const base = { date: source.date, description: source.description, refund: false, extraordinary: false };
+  if (source.transferId) {
+    const legs = data.transactions.filter((x) => x.transferId === source.transferId);
+    const from = legs.find((x) => x.amountCents < 0) ?? source;
     const to = legs.find((x) => x.amountCents > 0);
     return {
+      ...base,
       mode: 'transfer',
-      date: editing.date,
-      description: editing.description,
-      amount: fromCents(Math.abs(editing.amountCents)),
+      amount: Math.abs(source.amountCents),
       accountId: from.accountId,
       toAccountId: to?.accountId ?? null,
       categoryId: null,
       subcategoryId: null,
-      refund: false,
     };
   }
-  const kind = data.categoryIndex.get(editing.categoryId)?.kind ?? 'expense';
+  // Uncategorized entries take their kind from the sign.
+  const kind =
+    (source.categoryId ? data.categoryIndex.get(source.categoryId)?.kind : undefined) ??
+    (source.amountCents > 0 ? 'income' : 'expense');
   if (kind === 'transfer') {
     return {
+      ...base,
       mode: 'adjustment',
-      date: editing.date,
-      description: editing.description,
-      amount: fromCents(editing.amountCents),
-      accountId: editing.accountId,
+      amount: source.amountCents,
+      accountId: source.accountId,
       toAccountId: null,
-      categoryId: editing.categoryId,
+      categoryId: source.categoryId,
       subcategoryId: null,
-      refund: false,
     };
   }
   return {
+    ...base,
     mode: kind,
-    date: editing.date,
-    description: editing.description,
-    amount: fromCents(Math.abs(editing.amountCents)),
-    accountId: editing.accountId,
+    amount: Math.abs(source.amountCents),
+    accountId: source.accountId,
     toAccountId: null,
-    categoryId: editing.categoryId,
-    subcategoryId: editing.subcategoryId,
-    refund: signedAmount(kind, 1) * editing.amountCents < 0,
+    categoryId: source.categoryId,
+    subcategoryId: source.subcategoryId,
+    refund: signedAmount(kind, 1) * source.amountCents < 0,
+    extraordinary: source.extraordinary,
   };
 }
 
+/** Accent- and case-insensitive "contains" filter for the description suggestions. */
+const descriptionFilter: OptionsFilter = ({ options, search }) => {
+  const query = normalizeName(search);
+  return (options as ComboboxParsedItem[]).filter(
+    (o) => 'value' in o && query !== '' && normalizeName(o.value).includes(query),
+  );
+};
+
 interface Props {
   data: FinanceData;
+  /** Entry being edited; null for a new one. */
   editing: Transaction | null;
-  defaultDate: IsoDate;
+  /** Entry to copy into a new one ("Duplicar"), keeping its date. */
+  duplicateOf?: Transaction | null;
+  /** Month the date picker opens on when the date is empty. */
+  calendarDate?: IsoDate;
   onDone: () => void;
 }
 
-export function TransactionForm({ data, editing, defaultDate, onDone }: Props) {
+export function TransactionForm({ data, editing, duplicateOf = null, calendarDate, onDone }: Props) {
   const form = useForm<Values>({
-    initialValues: initialValues(data, editing, defaultDate),
+    initialValues: initialValues(data, duplicateOf ?? editing),
     validate: {
       date: (v) => (isIsoDate(v) ? null : t.common.required),
       amount: (v, values) =>
-        typeof v !== 'number' || (values.mode === 'adjustment' ? v === 0 : v <= 0)
-          ? t.transactions.amountPositive
-          : null,
+        v === null || (values.mode !== 'adjustment' && v <= 0) ? t.transactions.amountPositive : null,
       accountId: (v) => (v ? null : t.common.required),
       toAccountId: (v, values) =>
         values.mode !== 'transfer'
@@ -119,22 +146,45 @@ export function TransactionForm({ data, editing, defaultDate, onDone }: Props) {
               ? t.transactions.sameAccount
               : null,
       categoryId: (v, values) =>
-        values.mode === 'transfer' || values.mode === 'adjustment' || v ? null : t.common.required,
+        values.mode === 'transfer' || values.mode === 'adjustment' || values.extraordinary || v
+          ? null
+          : t.common.required,
     },
   });
   const { mode, categoryId } = form.getValues();
-  form.watch('mode', () => form.setFieldValue('categoryId', null));
-  form.watch('categoryId', () => form.setFieldValue('subcategoryId', null));
+
+  const suggestions = useMemo(
+    () =>
+      descriptionSuggestions(
+        data.transactions,
+        data.categoryIndex,
+        new Set(data.accounts.filter((a) => !a.archived).map((a) => a.id)),
+      ),
+    [data],
+  );
+  const pickSuggestion = (description: string) => {
+    const s = suggestions.find((x) => x.description === description);
+    if (!s || form.getValues().mode === 'adjustment') return;
+    form.setValues({
+      description: s.description,
+      mode: s.mode,
+      accountId: s.accountId,
+      toAccountId: s.toAccountId ?? form.getValues().toAccountId,
+      categoryId: s.categoryId,
+      subcategoryId: s.subcategoryId,
+    });
+  };
 
   const submit = async (v: Values) => {
-    const cents = toCents(Number(v.amount));
+    const cents = v.amount!;
+    const date = v.date!;
     const transferCategory = findTransferCategory(data.categories);
 
     if (v.mode === 'transfer') {
       if (!transferCategory) return;
       if (editing && !editing.transferId) await deleteTransaction(editing);
       await saveTransfer({
-        date: v.date,
+        date,
         description: v.description.trim() || t.kinds.transfer,
         amountCents: cents,
         fromAccountId: v.accountId!,
@@ -145,21 +195,24 @@ export function TransactionForm({ data, editing, defaultDate, onDone }: Props) {
     } else {
       if (editing?.transferId) await deleteTransaction(editing);
       const keepLink = editing && !editing.transferId;
-      const category = v.mode === 'adjustment' ? null : data.categoryIndex.get(v.categoryId!);
+      const category = v.mode === 'adjustment' || !v.categoryId ? null : data.categoryIndex.get(v.categoryId);
       await saveTransaction({
         id: keepLink ? editing.id : newId(),
-        date: v.date,
+        date,
         description: v.description.trim() || category?.name || '',
         amountCents: v.mode === 'adjustment' ? cents : signedAmount(v.mode, cents) * (v.refund ? -1 : 1),
         accountId: v.accountId!,
-        categoryId: v.categoryId!,
-        subcategoryId: v.subcategoryId,
+        categoryId: v.categoryId,
+        subcategoryId: v.categoryId ? v.subcategoryId : null,
+        extraordinary: v.mode !== 'adjustment' && v.extraordinary,
         transferId: null,
         recurringId: keepLink ? editing.recurringId : null,
         recurringMonth: keepLink ? editing.recurringMonth : null,
         installment: keepLink ? editing.installment : null,
       });
     }
+    await setMeta(META.lastAccountId, v.accountId!);
+    await setMeta(META.lastDate, date);
     notifications.show({ color: 'teal', message: t.transactions.saved });
     onDone();
   };
@@ -182,32 +235,38 @@ export function TransactionForm({ data, editing, defaultDate, onDone }: Props) {
             ]}
             key={form.key('mode')}
             {...form.getInputProps('mode')}
+            onChange={(v) => form.setValues({ mode: v as Mode, categoryId: null, subcategoryId: null })}
           />
         )}
-        <Group grow align="flex-start">
-          <DateInput
-            label={t.transactions.date}
-            valueFormat="DD/MM/YYYY"
-            key={form.key('date')}
-            {...form.getInputProps('date')}
-          />
-          <NumberInput
+        <SimpleGrid cols={{ base: 1, xs: 2 }} spacing="md">
+          <Group gap={6} wrap="nowrap" align="flex-start">
+            <DateInput
+              label={t.transactions.date}
+              placeholder={t.transactions.datePlaceholder}
+              valueFormat="DD/MM/YYYY"
+              defaultDate={calendarDate}
+              style={{ flex: 1, minWidth: 0 }}
+              key={form.key('date')}
+              {...form.getInputProps('date')}
+            />
+            <Button variant="light" px="xs" mt={25} onClick={() => form.setFieldValue('date', todayIso())}>
+              {t.transactions.today}
+            </Button>
+          </Group>
+          <MoneyInput
             label={t.transactions.amount}
-            prefix="R$ "
-            decimalSeparator=","
-            thousandSeparator="."
-            decimalScale={2}
-            fixedDecimalScale
             allowNegative={mode === 'adjustment'}
-            hideControls
-            inputMode="decimal"
             data-autofocus
             key={form.key('amount')}
             {...form.getInputProps('amount')}
           />
-        </Group>
-        <TextInput
+        </SimpleGrid>
+        <Autocomplete
           label={t.transactions.description}
+          data={suggestions.map((x) => x.description)}
+          filter={descriptionFilter}
+          limit={8}
+          onOptionSubmit={pickSuggestion}
           key={form.key('description')}
           {...form.getInputProps('description')}
         />
@@ -232,10 +291,12 @@ export function TransactionForm({ data, editing, defaultDate, onDone }: Props) {
             <Group grow align="flex-start">
               <Select
                 label={t.transactions.category}
+                clearable
                 data={categoryOptions(data.categories, kind, null, categoryId)}
                 searchable
                 key={form.key('categoryId')}
                 {...form.getInputProps('categoryId')}
+                onChange={(v) => form.setValues({ categoryId: v, subcategoryId: null })}
               />
               <Select
                 label={t.transactions.subcategory}
@@ -252,6 +313,12 @@ export function TransactionForm({ data, editing, defaultDate, onDone }: Props) {
               description={t.transactions.refundHint}
               key={form.key('refund')}
               {...form.getInputProps('refund', { type: 'checkbox' })}
+            />
+            <Checkbox
+              label={t.transactions.extraordinary}
+              description={t.transactions.extraordinaryHint}
+              key={form.key('extraordinary')}
+              {...form.getInputProps('extraordinary', { type: 'checkbox' })}
             />
           </>
         )}

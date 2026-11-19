@@ -4,6 +4,7 @@ import { indexCategories } from '../domain/cashflow/summary';
 import { buildTransfer, type TransferInput } from '../domain/cashflow/transfer';
 import { addMonths, todayIso } from '../domain/dates';
 import { createDemoData } from '../domain/demo';
+import type { ImportPlan } from '../domain/import/plan';
 import { createDefaultSeed, findTransferCategory } from '../domain/seed';
 import type {
   Account,
@@ -78,6 +79,7 @@ export async function saveAccount(account: Account, openingBalanceCents: Cents =
         accountId: account.id,
         categoryId: transfer.id,
         subcategoryId: null,
+        extraordinary: false,
         transferId: null,
         recurringId: null,
         recurringMonth: null,
@@ -120,7 +122,7 @@ export async function removeCategory(id: string): Promise<'deleted' | 'archived'
     const ids = [id, ...children];
     const used =
       (await db.transactions
-        .filter((t) => ids.includes(t.categoryId) || ids.includes(t.subcategoryId ?? ''))
+        .filter((t) => ids.includes(t.categoryId ?? '') || ids.includes(t.subcategoryId ?? ''))
         .count()) > 0 ||
       (await db.recurring
         .filter((r) => ids.includes(r.categoryId) || ids.includes(r.subcategoryId ?? ''))
@@ -155,6 +157,14 @@ export async function saveTransfer(input: TransferInput): Promise<void> {
     if (input.transferId) await db.transactions.where('transferId').equals(input.transferId).delete();
     await db.transactions.bulkPut(legs);
   });
+}
+
+/** Partial update, used by quick fixes on the Pendências screen. */
+export async function updateTransaction(
+  id: string,
+  changes: Partial<Omit<Transaction, 'id'>>,
+): Promise<void> {
+  await db.transactions.update(id, changes);
 }
 
 /** Deletes a transaction; for a transfer, deletes both legs. */
@@ -208,5 +218,15 @@ export async function generateRecurringForMonth(month: YearMonth): Promise<numbe
     const created = generateRecurring(templates, existing, indexCategories(categories), month, newId);
     await db.transactions.bulkPut(created);
     return created.length;
+  });
+}
+
+// ---------- import ----------
+
+export async function applyImportPlan(plan: ImportPlan): Promise<void> {
+  await db.transaction('rw', [db.accounts, db.categories, db.transactions], async () => {
+    await db.accounts.bulkPut(plan.accounts);
+    await db.categories.bulkPut(plan.categories);
+    await db.transactions.bulkPut(plan.transactions);
   });
 }
