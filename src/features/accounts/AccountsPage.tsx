@@ -23,7 +23,7 @@ import { IconArchive, IconDots, IconPencil, IconPlus, IconRestore } from '@table
 import { useState } from 'react';
 import { Money, PageHeader } from '../../components/common';
 import { MoneyInput } from '../../components/MoneyInput';
-import { accountBalances } from '../../domain/cashflow/summary';
+import { accountBalances, totalBalance } from '../../domain/cashflow/summary';
 import type { Account, AccountType } from '../../domain/types';
 import { t } from '../../i18n/pt-BR';
 import { db } from '../../storage/db';
@@ -45,6 +45,7 @@ function AccountForm({
     initialValues: {
       name: editing?.name ?? '',
       type: (editing?.type ?? 'checking') as AccountType,
+      includeInTotal: editing?.includeInTotal ?? true,
       /** Cents; may be negative (debt). */
       openingBalance: null as number | null,
     },
@@ -58,6 +59,7 @@ function AccountForm({
         type: v.type,
         archived: editing?.archived ?? false,
         order: editing?.order ?? nextOrder,
+        includeInTotal: v.includeInTotal,
       },
       editing ? 0 : (v.openingBalance ?? 0),
     );
@@ -68,6 +70,11 @@ function AccountForm({
       <Stack>
         <TextInput label={t.accounts.name} data-autofocus {...form.getInputProps('name')} />
         <Select label={t.accounts.type} data={TYPES} allowDeselect={false} {...form.getInputProps('type')} />
+        <Switch
+          label={t.accounts.includeInTotal}
+          description={t.accounts.includeInTotalHint}
+          {...form.getInputProps('includeInTotal', { type: 'checkbox' })}
+        />
         {!editing && (
           <MoneyInput
             label={t.accounts.openingBalance}
@@ -101,7 +108,7 @@ export function AccountsPage() {
   }
   const balances = accountBalances(data.transactions);
   const visible = data.accounts.filter((a) => showArchived || !a.archived);
-  const total = data.accounts.reduce((s, a) => s + (balances.get(a.id) ?? 0), 0);
+  const total = totalBalance(balances, data.accounts);
 
   const confirmRemove = (account: Account) =>
     modals.openConfirmModal({
@@ -157,6 +164,11 @@ export function AccountsPage() {
                   {account.archived && (
                     <Badge variant="outline" color="gray" size="sm">
                       {t.common.archived}
+                    </Badge>
+                  )}
+                  {!account.includeInTotal && (
+                    <Badge variant="outline" color="yellow" size="sm">
+                      {t.accounts.outOfTotal}
                     </Badge>
                   )}
                 </Group>

@@ -197,6 +197,16 @@ describe('backup migration', () => {
     expect(restored.every((t) => typeof t.extraordinary === 'boolean')).toBe(true);
   });
 
+  it('reads version 3 backups (accounts without includeInTotal → included)', async () => {
+    await loadDemoData('2026-11');
+    const backup = await createBackup();
+    const v3 = JSON.parse(JSON.stringify({ ...backup, schemaVersion: 3 }));
+    for (const a of v3.data.accounts) delete a.includeInTotal;
+    await clearAllData();
+    await restoreBackup(parseBackup(v3));
+    expect((await db.accounts.toArray()).every((a) => a.includeInTotal === true)).toBe(true);
+  });
+
   it('reads version 2 backups (no investments)', async () => {
     await loadDemoData('2026-11');
     const backup = await createBackup();

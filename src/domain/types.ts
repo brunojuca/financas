@@ -13,6 +13,8 @@ export interface Account {
   type: AccountType;
   archived: boolean;
   order: number;
+  /** Counted in "Saldo total" (and its history chart). Off for e.g. a brokerage account tracked in Investimentos. */
+  includeInTotal: boolean;
 }
 
 export type CategoryKind = 'income' | 'expense' | 'transfer';

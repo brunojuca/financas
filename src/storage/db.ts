@@ -48,6 +48,17 @@ export class FinancasDb extends Dexie {
     this.version(3).stores({ titulos: 'id', lots: 'id, tituloId', redemptions: 'id, tituloId' });
     // v4: cache of public reference data (not user data: never in backups).
     this.version(4).stores({ reference: 'key' });
+    // v5: accounts gained `includeInTotal` (existing accounts stay in the total).
+    this.version(5)
+      .stores({})
+      .upgrade((tx) =>
+        tx
+          .table('accounts')
+          .toCollection()
+          .modify((a: Record<string, unknown>) => {
+            if (typeof a.includeInTotal !== 'boolean') a.includeInTotal = true;
+          }),
+      );
   }
 }
 

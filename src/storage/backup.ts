@@ -8,8 +8,9 @@ export const BACKUP_APP = 'financas';
 /**
  * v2: transactions gained `extraordinary` and may have `categoryId: null`.
  * v3: investments (`titulos`, `lots`, `redemptions`); missing in older files → empty.
+ * v4: accounts gained `includeInTotal`; missing in older files → true.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export interface BackupData {
   accounts: Account[];
@@ -93,7 +94,15 @@ export function parseBackup(raw: unknown): BackupFile {
   const all = (key: string, valid: (r: Record<string, unknown>) => boolean) =>
     (data[key] as unknown[]).forEach((r, i) => check(isObj(r) && valid(r), `invalid ${key}[${i}]`));
 
-  all('accounts', (r) => isStr(r.id) && isStr(r.name) && isStr(r.type) && typeof r.archived === 'boolean');
+  all(
+    'accounts',
+    (r) =>
+      isStr(r.id) &&
+      isStr(r.name) &&
+      isStr(r.type) &&
+      typeof r.archived === 'boolean' &&
+      (r.includeInTotal === undefined || typeof r.includeInTotal === 'boolean'),
+  );
   all(
     'categories',
     (r) =>
@@ -189,7 +198,13 @@ export async function restoreBackup(file: BackupFile): Promise<void> {
         db.lots.clear(),
         db.redemptions.clear(),
       ]);
-      await db.accounts.bulkPut(data.accounts.map((a, i) => ({ ...a, order: a.order ?? i })));
+      await db.accounts.bulkPut(
+        data.accounts.map((a, i) => ({
+          ...a,
+          order: a.order ?? i,
+          includeInTotal: a.includeInTotal ?? true,
+        })),
+      );
       await db.categories.bulkPut(
         data.categories.map((c, i) => ({ ...c, archived: c.archived ?? false, order: c.order ?? i })),
       );

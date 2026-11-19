@@ -198,6 +198,7 @@ export function buildImportPlan(
         type: m.type,
         archived: false,
         order: accountOrder++,
+        includeInTotal: true,
       };
       newAccounts.push(account);
       accountIdByKey.set(key, account.id);

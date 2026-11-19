@@ -10,6 +10,8 @@ import { pendingRecurringCount } from '../../components/options';
 import {
   accountBalances,
   balanceHistory,
+  includedAccountIds,
+  totalBalance,
   expensesByCategory,
   monthlySeries,
   monthTotals,
@@ -62,7 +64,7 @@ export function DashboardPage() {
     const months = monthRange(addMonths(month, -11), month);
     const labels = months.map(formatMonthShort);
     const series = monthlySeries(data.transactions, data.categoryIndex, months);
-    const history = balanceHistory(data.transactions, months);
+    const history = balanceHistory(data.transactions, months, includedAccountIds(data.accounts));
     const byCategory = expensesByCategory(data.transactions, data.categoryIndex, month);
 
     const incomeVsExpense: ChartOption = {
@@ -132,7 +134,7 @@ export function DashboardPage() {
   }
 
   const balances = accountBalances(data.transactions);
-  const total = [...balances.values()].reduce((s, v) => s + v, 0);
+  const total = totalBalance(balances, data.accounts);
   const totals = monthTotals(data.transactions, data.categoryIndex, month);
   const pending = pendingRecurringCount(data, month);
   const uncategorized = data.transactions.filter((tx) => tx.categoryId === null && !tx.extraordinary).length;
@@ -221,6 +223,7 @@ export function DashboardPage() {
                       </Text>
                       <Text size="xs" c="dimmed">
                         {t.accountTypes[a.type]}
+                        {!a.includeInTotal && ` · ${t.accounts.outOfTotal}`}
                       </Text>
                     </Stack>
                     <Money cents={balances.get(a.id) ?? 0} fw={600} />

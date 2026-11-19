@@ -85,6 +85,8 @@ Do not add dependencies beyond these without asking the user first.
   opposite values in different accounts are paired into one transfer. Rows already in the app are skipped.
   Export uses the same layout, so export → import round-trips.
 - Accounts and categories that have transactions are **archived, never deleted**.
+- Accounts have `includeInTotal`: when off, the account is left out of "Saldo total" and its history chart (e.g. a
+  brokerage account whose títulos are tracked in Investimentos). Transfers to it then lower the total.
 - First run asks: start with the default seed, import a backup, or load demo data.
 - Credit-card statement closing/due dates are a later feature; the `creditCard` account type leaves room for it.
 - Dates: ISO strings `YYYY-MM-DD` for calendar dates. Never use `new Date('YYYY-MM-DD')` for date math (timezone bugs); use the helpers in `src/domain/dates.ts`.

@@ -100,3 +100,33 @@ describe('distribution', () => {
     expect(selic).toBe(row('Tesouro Selic').today.net + row('Tesouro Reserva').today.net);
   });
 });
+
+describe('Tesouro Selic exemption: R$ 10.000 per CPF, newest purchases first, day by day (D5)', () => {
+  const selic = row('Tesouro Selic');
+  // Demo: R$ 8.000 bought 03/02/2025 (older) and R$ 5.000 bought 04/08/2025 (newer).
+  const older = selic.lots.find((l) => l.lot.date === '2025-02-03')!;
+  const newer = selic.lots.find((l) => l.lot.date === '2025-08-04')!;
+
+  it('gives the exemption to the newest purchase first', () => {
+    // The newer lot (≈ R$ 5.700 today) is always within the R$ 10.000: it never pays custody.
+    expect(newer.today.custody).toBe(0);
+    // The older lot pays on what exceeds the R$ 10.000 left after the newer one.
+    expect(older.today.custody).toBeGreaterThan(0);
+    const exemptionToday = (older.exemption as (d: string) => number)('2026-11-17');
+    const newerValue = newer.today.gross / 100;
+    expect(exemptionToday).toBeCloseTo(10_000 - newerValue, 0);
+  });
+
+  it('charged nothing while the total was under R$ 10.000', async () => {
+    const { lotCustody } = await import('./valuation');
+    // Before the second purchase only R$ 8.000 (+ income) was held: no custody on those days.
+    expect(lotCustody(selic.titulo, older.lot, '2025-08-01', market, older.exemption)).toBe(0);
+    // Without any exemption, the same period would have paid custody.
+    expect(lotCustody(selic.titulo, older.lot, '2025-08-01', market, 0)).toBeGreaterThan(0);
+  });
+
+  it('keeps Tesouro Reserva in its own pool', () => {
+    const reserva = row('Tesouro Reserva'); // R$ 2.500: under its own R$ 10.000
+    expect(reserva.today.custody).toBe(0);
+  });
+});

@@ -6,6 +6,8 @@ import { generateRecurring, isDueIn } from './recurring';
 import {
   accountBalances,
   balanceHistory,
+  includedAccountIds,
+  totalBalance,
   expensesByCategory,
   indexCategories,
   monthlySeries,
@@ -150,6 +152,21 @@ describe('summary', () => {
       { month: '2026-09', balance: 100000 },
       { month: '2026-10', balance: 100000 + 500000 - 74500 },
       { month: '2026-11', balance: 100000 + 500000 - 74500 - 10000 },
+    ]);
+  });
+
+  it('leaves accounts flagged out of "Saldo total" out of the total and its history', () => {
+    const withoutCard = accounts.map((a) => (a.id === card.id ? { ...a, includeInTotal: false } : a));
+    const balances = accountBalances(transactions);
+    // Checking: 1.000 + 5.000 − 300 paid to the card (the transfer leaves the summed accounts).
+    expect(totalBalance(balances, withoutCard)).toBe(100000 + 500000 - 30000);
+    expect(totalBalance(balances, accounts)).toBe(100000 + 500000 - 74500 - 10000);
+    expect(
+      balanceHistory(transactions, ['2026-09', '2026-10', '2026-11'], includedAccountIds(withoutCard)),
+    ).toEqual([
+      { month: '2026-09', balance: 100000 },
+      { month: '2026-10', balance: 570000 },
+      { month: '2026-11', balance: 570000 },
     ]);
   });
 });

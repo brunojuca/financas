@@ -16,6 +16,14 @@ export const CUSTODY_RATE = 0.002;
  * reproduced Tesouro statements best (two of three to the cent, the third within 1 cent; decision D4).
  */
 export const CUSTODY_DAILY = (1 + CUSTODY_RATE) ** (1 / 365) - 1;
+/**
+ * A lot's custody exemption: a fixed amount in cents, or its exemption in reais on each day (the pool rule of
+ * `exemption.ts`, where the R$ 10.000 per CPF goes to the newest purchases first — decision D5).
+ */
+export type Exemption = Cents | ((date: IsoDate) => number);
+
+const exemptionAt = (e: Exemption) => (typeof e === 'number' ? () => e / 100 : e);
+
 /** Custody exemption for Tesouro Selic (per CPF) and Tesouro Reserva (decisions D3, D5). */
 export const CUSTODY_EXEMPTION_CENTS = 1_000_000;
 
@@ -143,9 +151,9 @@ function curveCustody(
   from: IsoDate,
   to: IsoDate,
   market: MarketData,
-  exemption: number,
+  exemption: (date: IsoDate) => number,
 ) {
-  const taxable = (d: IsoDate) => Math.max(0, lotGrossValue(titulo, lot, d, market) - exemption);
+  const taxable = (d: IsoDate) => Math.max(0, lotGrossValue(titulo, lot, d, market) - exemption(d));
   const steps = monthlySteps(from, to);
   let custody = 0;
   let previous = taxable(steps[0]!);
@@ -171,13 +179,13 @@ export function lotCustody(
   lot: Lot,
   date: IsoDate,
   market: MarketData,
-  exemptionCents: Cents = 0,
+  exemptionCents: Exemption = 0,
   prices: TesouroPrices | null = null,
 ): Cents {
   if (!paysCustody(titulo.product)) return 0;
   const at = clampToMaturity(titulo, date);
   if (at <= lot.date) return 0;
-  const exemption = exemptionCents / 100;
+  const exemption = exemptionAt(exemptionCents);
   const rows = isPricedTesouro(titulo.product) ? priceSeries(prices, titulo) : [];
   let custody = 0;
   let marketStart = at;
@@ -189,7 +197,7 @@ export function lotCustody(
     let i = rowIndexOn(rows, marketStart);
     for (let d = marketStart; d < marketEnd; d = addDays(d, 1)) {
       while (i + 1 < rows.length && rows[i + 1]!.date <= d) i++;
-      custody += CUSTODY_DAILY * Math.max(0, quantity * rows[i]!.sell - exemption);
+      custody += CUSTODY_DAILY * Math.max(0, quantity * rows[i]!.sell - exemption(d));
     }
     if (marketEnd < marketStart) marketEnd = marketStart;
   }
@@ -212,7 +220,7 @@ export function valueLot(
   lot: Lot,
   date: IsoDate,
   market: MarketData,
-  exemptionCents: Cents = 0,
+  exemptionCents: Exemption = 0,
   prices: TesouroPrices | null = null,
 ): LotValuation {
   const at = clampToMaturity(titulo, date);
@@ -239,7 +247,7 @@ export function valueLotAtMarket(
   date: IsoDate,
   market: MarketData,
   prices: TesouroPrices | null,
-  exemptionCents: Cents = 0,
+  exemptionCents: Exemption = 0,
 ): (LotValuation & { priceDate: IsoDate }) | null {
   if (!isPricedTesouro(titulo.product)) return null;
   const row = priceOn(prices, titulo, date);

@@ -144,6 +144,10 @@ export const t = {
     openingBalanceHint:
       'Lançado hoje como "Saldo inicial". Use valor negativo para dívida (ex.: fatura em aberto).',
     balance: 'Saldo',
+    includeInTotal: 'Incluir no saldo total',
+    includeInTotalHint:
+      'Desligue para contas que não devem somar no saldo total, como uma corretora cujos títulos você acompanha em Investimentos.',
+    outOfTotal: 'Fora do saldo total',
     empty: 'Nenhuma conta cadastrada.',
     removeTitle: 'Remover conta?',
     removeText:

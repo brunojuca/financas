@@ -1,5 +1,5 @@
 import { monthOf } from '../dates';
-import type { Category, Cents, Transaction, YearMonth } from '../types';
+import type { Account, Category, Cents, Transaction, YearMonth } from '../types';
 
 export type CategoryIndex = ReadonlyMap<string, Category>;
 
@@ -100,11 +100,30 @@ export function expensesByCategory(
 }
 
 /** Total balance (all accounts) at the end of each month. */
+/** Accounts counted in "Saldo total". */
+export function includedAccountIds(accounts: Account[]): Set<string> {
+  return new Set(accounts.filter((a) => a.includeInTotal !== false).map((a) => a.id));
+}
+
+/** "Saldo total": sum of the balances of the accounts flagged `includeInTotal`. */
+export function totalBalance(balances: Map<string, Cents>, accounts: Account[]): Cents {
+  const included = includedAccountIds(accounts);
+  let total = 0;
+  for (const [id, cents] of balances) if (included.has(id)) total += cents;
+  return total;
+}
+
+/**
+ * Balance at the end of each month. With `accountIds`, only those accounts count (e.g. the ones in "Saldo total");
+ * a transfer to an account left out then lowers the total, as the money leaves what is being summed.
+ */
 export function balanceHistory(
   transactions: Transaction[],
   months: YearMonth[],
+  accountIds?: ReadonlySet<string>,
 ): { month: YearMonth; balance: Cents }[] {
-  const sorted = [...transactions].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  const counted = accountIds ? transactions.filter((t) => accountIds.has(t.accountId)) : transactions;
+  const sorted = [...counted].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   const result: { month: YearMonth; balance: Cents }[] = [];
   let i = 0;
   let running = 0;

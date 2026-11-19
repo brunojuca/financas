@@ -3,17 +3,17 @@ import { calendarDaysBetween } from '../dates';
 import type { Cents, IsoDate } from '../types';
 import { irr252, type CashFlow } from './irr';
 import type { MarketData } from './market';
+import { poolExemption } from './exemption';
 import { applyRedemptions } from './redemption';
 import { incomeTaxRate } from './tax';
 import type { TesouroPrices } from './tesouroPrices';
 import { isPricedTesouro, isTaxExempt, type Lot, type Product, type Redemption, type Titulo } from './types';
 import {
-  CUSTODY_EXEMPTION_CENTS,
-  lotGrossValue,
   lotQuantity,
   lotRate,
   valueLot,
   valueLotAtMarket,
+  type Exemption,
   type LotValuation,
 } from './valuation';
 
@@ -118,8 +118,8 @@ export interface LotSummary {
   /** What is left of the lot after redemptions (amount and quantity scaled down). */
   lot: Lot;
   rate: number | null;
-  /** Custody exemption allotted to this lot (cents). */
-  exemption: Cents;
+  /** Custody exemption of this lot (fixed, or per day for Tesouro Selic / Reserva). */
+  exemption: Exemption;
   today: LotValuation;
   atMaturity: LotValuation | null;
   /** Sold at the Tesouro's published price (priced Tesouro with a price only). */
@@ -176,7 +176,7 @@ const EXEMPTION_POOLS: Product[] = ['tesouroSelic', 'tesouroReserva'];
 
 /**
  * Values every título on `today` and at maturity. Lots still held are what remains after redemptions;
- * the custody exemption of each pool is split among its lots in proportion to their value today (D5).
+ * the custody exemption of each pool goes, day by day, to its newest purchases first (D5, `exemption.ts`).
  */
 export function summarizePortfolio(
   titulos: Titulo[],
@@ -193,25 +193,22 @@ export function summarizePortfolio(
     return { titulo, own, ownRedemptions, remaining, parts };
   });
 
-  // Exemption shares by value today.
-  const exemption = new Map<string, Cents>();
+  // R$ 10.000 exemption per pool, day by day, newest purchases first (D3, D5).
+  const exemptionOf = new Map<Product, (lot: Lot) => Exemption>();
   for (const pool of EXEMPTION_POOLS) {
-    const poolLots = held
-      .filter((h) => h.titulo.product === pool && !(h.titulo.maturity && h.titulo.maturity <= today))
-      .flatMap((h) =>
-        h.remaining.map((lot) => ({ lot, value: lotGrossValue(h.titulo, lot, today, market) })),
-      );
-    const total = poolLots.reduce((s, x) => s + x.value, 0);
-    for (const { lot, value } of poolLots) {
-      exemption.set(lot.id, total > 0 ? Math.round((CUSTODY_EXEMPTION_CENTS * value) / total) : 0);
-    }
+    const entries = held
+      .filter((h) => h.titulo.product === pool)
+      .map((h) => ({ titulo: h.titulo, lots: h.own, redemptions: h.ownRedemptions }));
+    if (entries.length) exemptionOf.set(pool, poolExemption(entries, market, prices));
   }
+  const noExemption = (): Exemption => 0;
 
   const rows: TituloSummary[] = held.map(({ titulo, own, ownRedemptions, remaining, parts }) => {
     const matured = titulo.maturity !== null && titulo.maturity <= today;
     const priced = isPricedTesouro(titulo.product);
+    const exemptionFor = exemptionOf.get(titulo.product) ?? noExemption;
     const lotSummaries: LotSummary[] = remaining.map((lot) => {
-      const share = exemption.get(lot.id) ?? 0;
+      const share = exemptionFor(lot);
       return {
         lot,
         rate: priced ? lotRate(titulo, lot, market) : null,
@@ -229,7 +226,7 @@ export function summarizePortfolio(
     const baseGross: CashFlow[] = [...flows];
     for (const redemption of ownRedemptions) {
       const slices = (parts.get(redemption.id) ?? []).map((p) =>
-        valueLot(titulo, p.slice, redemption.date, market),
+        valueLot(titulo, p.slice, redemption.date, market, exemptionFor(p.slice), prices),
       );
       const net = redemption.netCents ?? slices.reduce((s, v) => s + v.net, 0);
       const gross = redemption.grossCents ?? slices.reduce((s, v) => s + v.gross, 0);
