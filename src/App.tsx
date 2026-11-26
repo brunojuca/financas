@@ -17,6 +17,7 @@ import { useDisclosure } from '@mantine/hooks';
 import {
   IconArrowsExchange,
   IconBuildingBank,
+  IconCreditCard,
   IconPigMoney,
   IconAlertCircle,
   IconCategory,
@@ -34,6 +35,7 @@ import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AccountsPage } from './features/accounts/AccountsPage';
 import { BudgetPage } from './features/budget/BudgetPage';
+import { CardsPage } from './features/cards/CardsPage';
 import { CategoriesPage } from './features/categories/CategoriesPage';
 import { DashboardPage } from './features/dashboard/DashboardPage';
 import { ImportPage } from './features/import/ImportPage';
@@ -44,6 +46,7 @@ import { TransactionsPage } from './features/transactions/TransactionsPage';
 import { WelcomePage } from './features/welcome/WelcomePage';
 import { t } from './i18n/pt-BR';
 import { db, getMeta, META, requestPersistentStorage } from './storage/db';
+import { useAutoRecurring } from './storage/useAutoRecurring';
 
 // Investments (and their bundled market data) load only when opened.
 const InvestmentsPage = lazy(() =>
@@ -58,6 +61,7 @@ const NAV = [
   { to: '/lancamentos', label: t.nav.transactions, icon: IconArrowsExchange },
   { to: '/pendencias', label: t.nav.issues, icon: IconAlertCircle },
   { to: '/contas', label: t.nav.accounts, icon: IconBuildingBank },
+  { to: '/cartoes', label: t.nav.cards, icon: IconCreditCard },
   { to: '/investimentos', label: t.nav.investments, icon: IconPigMoney },
   { to: '/orcamento', label: t.nav.budget, icon: IconTargetArrow },
   { to: '/recorrentes', label: t.nav.recurring, icon: IconRepeat },
@@ -97,6 +101,7 @@ export function App() {
   useEffect(() => {
     if (initialized) void requestPersistentStorage();
   }, [initialized]);
+  useAutoRecurring(!!initialized);
 
   if (initialized === undefined) {
     return (
@@ -159,6 +164,7 @@ export function App() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/lancamentos" element={<TransactionsPage />} />
             <Route path="/contas" element={<AccountsPage />} />
+            <Route path="/cartoes" element={<CardsPage />} />
             <Route
               path="/investimentos"
               element={

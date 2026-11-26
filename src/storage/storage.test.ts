@@ -5,10 +5,12 @@ import { isValidRow, parseTransactionsCsv } from '../domain/import/csv';
 import { buildImportPlan, summarizeSource, suggestMappings } from '../domain/import/plan';
 import { db } from './db';
 import {
+  deleteInstallmentGroup,
   clearAllData,
   copyBudgetFromPreviousMonth,
   deleteTransaction,
-  generateRecurringForMonth,
+  endRecurringFrom,
+  generateDueRecurring,
   initializeWithSeed,
   loadDemoData,
   removeAccount,
@@ -82,11 +84,22 @@ describe('storage', () => {
     expect(await db.transactions.count()).toBe(0);
   });
 
-  it('generates recurring entries once per month', async () => {
+  it('stores due recurring entries once; a deleted month stays skipped; ending deletes later entries', async () => {
     await loadDemoData('2026-11');
-    const first = await generateRecurringForMonth('2026-12');
+    const first = await generateDueRecurring('2026-12-31');
     expect(first).toBeGreaterThan(0);
-    expect(await generateRecurringForMonth('2026-12')).toBe(0);
+    expect(await generateDueRecurring('2026-12-31')).toBe(0);
+    const rent = (await db.recurring.toArray()).find((r) => r.description === 'Aluguel')!;
+    const december = (await db.transactions.where('recurringId').equals(rent.id).toArray()).find(
+      (t) => t.recurringMonth === '2026-12',
+    )!;
+    await deleteTransaction(december);
+    expect((await db.recurring.get(rent.id))?.skippedMonths).toEqual(['2026-12']);
+    expect(await generateDueRecurring('2026-12-31')).toBe(0);
+    await endRecurringFrom(rent.id, '2026-10');
+    const left = await db.transactions.where('recurringId').equals(rent.id).toArray();
+    expect(left.every((t) => t.recurringMonth! < '2026-10')).toBe(true);
+    expect((await db.recurring.get(rent.id))?.endMonth).toBe('2026-09');
   });
 
   it('copies budgets from the previous month', async () => {
@@ -195,6 +208,48 @@ describe('backup migration', () => {
     await restoreBackup(parseBackup(v1));
     const restored = await db.transactions.toArray();
     expect(restored.every((t) => typeof t.extraordinary === 'boolean')).toBe(true);
+  });
+
+  it('reads version 4 backups (no credit-card fields)', async () => {
+    await loadDemoData('2026-11');
+    const backup = await createBackup();
+    const v4 = JSON.parse(JSON.stringify({ ...backup, schemaVersion: 4 }));
+    for (const a of v4.data.accounts) delete a.creditCard;
+    for (const t of v4.data.transactions) {
+      delete t.billMonth;
+      delete t.installmentGroupId;
+    }
+    await clearAllData();
+    await restoreBackup(parseBackup(v4));
+    expect((await db.accounts.toArray()).every((a) => a.creditCard === null)).toBe(true);
+    expect(
+      (await db.transactions.toArray()).every((t) => t.billMonth === null && t.installmentGroupId === null),
+    ).toBe(true);
+  });
+
+  it('reads version 5 backups (templates without skippedMonths → past months without an entry)', async () => {
+    await loadDemoData('2026-11');
+    const backup = await createBackup();
+    const v5 = JSON.parse(JSON.stringify({ ...backup, schemaVersion: 5 }));
+    for (const r of v5.data.recurring) delete r.skippedMonths;
+    const rent = v5.data.recurring.find((r: { description: string }) => r.description === 'Aluguel');
+    const firstRent = v5.data.transactions.find(
+      (t: { recurringId: string; recurringMonth: string }) =>
+        t.recurringId === rent.id && t.recurringMonth === '2026-06',
+    );
+    v5.data.transactions = v5.data.transactions.filter((t: { id: string }) => t.id !== firstRent.id);
+    await clearAllData();
+    await restoreBackup(parseBackup(v5));
+    expect((await db.recurring.get(rent.id))?.skippedMonths).toEqual(['2026-06']);
+    expect((await db.recurring.toArray()).every((r) => Array.isArray(r.skippedMonths))).toBe(true);
+  });
+
+  it('deletes all installments of a card purchase together', async () => {
+    await loadDemoData('2026-11');
+    const parcels = (await db.transactions.toArray()).filter((t) => t.installmentGroupId);
+    expect(parcels).toHaveLength(6);
+    await deleteInstallmentGroup(parcels[0]!.installmentGroupId!);
+    expect((await db.transactions.toArray()).some((t) => t.installmentGroupId)).toBe(false);
   });
 
   it('reads version 3 backups (accounts without includeInTotal → included)', async () => {

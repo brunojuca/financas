@@ -6,6 +6,7 @@ import {
   Group,
   Loader,
   Menu,
+  NumberInput,
   Modal,
   Paper,
   Select,
@@ -24,6 +25,8 @@ import { useState } from 'react';
 import { Money, PageHeader } from '../../components/common';
 import { MoneyInput } from '../../components/MoneyInput';
 import { accountBalances, totalBalance } from '../../domain/cashflow/summary';
+import { currentMonth, formatDateBR, monthEnd, todayIso } from '../../domain/dates';
+import { formatBRL } from '../../domain/money';
 import type { Account, AccountType } from '../../domain/types';
 import { t } from '../../i18n/pt-BR';
 import { db } from '../../storage/db';
@@ -31,14 +34,17 @@ import { newId, removeAccount, saveAccount } from '../../storage/repo';
 import { useFinanceData } from '../../storage/useFinanceData';
 
 const TYPES = Object.entries(t.accountTypes).map(([value, label]) => ({ value, label }));
+const isDay = (v: number | string) => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 31;
 
 function AccountForm({
   editing,
   nextOrder,
+  accounts,
   onDone,
 }: {
   editing: Account | null;
   nextOrder: number;
+  accounts: Account[];
   onDone: () => void;
 }) {
   const form = useForm({
@@ -48,9 +54,21 @@ function AccountForm({
       includeInTotal: editing?.includeInTotal ?? true,
       /** Cents; may be negative (debt). */
       openingBalance: null as number | null,
+      closingDay: (editing?.creditCard?.closingDay ?? '') as number | string,
+      dueDay: (editing?.creditCard?.dueDay ?? '') as number | string,
+      limitCents: editing?.creditCard?.limitCents ?? (null as number | null),
+      payingAccountId: editing?.creditCard?.payingAccountId ?? (null as string | null),
     },
-    validate: { name: (v) => (v.trim() ? null : t.common.required) },
+    validate: {
+      name: (v) => (v.trim() ? null : t.common.required),
+      closingDay: (v, values) => (values.type !== 'creditCard' || isDay(v) ? null : t.accounts.invalidDay),
+      dueDay: (v, values) => (values.type !== 'creditCard' || isDay(v) ? null : t.accounts.invalidDay),
+    },
   });
+  const isCard = form.getValues().type === 'creditCard';
+  const payers = accounts
+    .filter((a) => !a.archived && a.type !== 'creditCard' && a.id !== editing?.id)
+    .map((a) => ({ value: a.id, label: a.name }));
   const submit = async (v: typeof form.values) => {
     await saveAccount(
       {
@@ -60,6 +78,15 @@ function AccountForm({
         archived: editing?.archived ?? false,
         order: editing?.order ?? nextOrder,
         includeInTotal: v.includeInTotal,
+        creditCard:
+          v.type === 'creditCard'
+            ? {
+                closingDay: Number(v.closingDay),
+                dueDay: Number(v.dueDay),
+                limitCents: v.limitCents,
+                payingAccountId: v.payingAccountId,
+              }
+            : null,
       },
       editing ? 0 : (v.openingBalance ?? 0),
     );
@@ -70,6 +97,37 @@ function AccountForm({
       <Stack>
         <TextInput label={t.accounts.name} data-autofocus {...form.getInputProps('name')} />
         <Select label={t.accounts.type} data={TYPES} allowDeselect={false} {...form.getInputProps('type')} />
+        {isCard && (
+          <>
+            <Group grow align="flex-start">
+              <NumberInput
+                label={t.accounts.closingDay}
+                description={t.accounts.closingDayHint}
+                min={1}
+                max={31}
+                allowDecimal={false}
+                {...form.getInputProps('closingDay')}
+              />
+              <NumberInput
+                label={t.accounts.dueDay}
+                min={1}
+                max={31}
+                allowDecimal={false}
+                {...form.getInputProps('dueDay')}
+              />
+            </Group>
+            <Group grow align="flex-start">
+              <MoneyInput label={t.accounts.limit} {...form.getInputProps('limitCents')} />
+              <Select
+                label={t.accounts.payingAccount}
+                description={t.accounts.payingAccountHint}
+                data={payers}
+                clearable
+                {...form.getInputProps('payingAccountId')}
+              />
+            </Group>
+          </>
+        )}
         <Switch
           label={t.accounts.includeInTotal}
           description={t.accounts.includeInTotalHint}
@@ -106,7 +164,14 @@ export function AccountsPage() {
       </Center>
     );
   }
-  const balances = accountBalances(data.transactions);
+  const today = todayIso();
+  // "Previsto": at the end of this month, with future entries and recurring ones still to come.
+  const end = monthEnd(currentMonth());
+  const balances = accountBalances([...data.transactions, ...data.projected], end);
+  // Card limit: everything owed that is stored (future installments included), as the bank counts it.
+  const owed = accountBalances(data.transactions);
+  const balancesToday = accountBalances(data.transactions, today);
+  const totalToday = totalBalance(balancesToday, data.accounts);
   const visible = data.accounts.filter((a) => showArchived || !a.archived);
   const total = totalBalance(balances, data.accounts);
 
@@ -139,8 +204,20 @@ export function AccountsPage() {
 
       <Paper mb="md">
         <Group justify="space-between">
-          <Text fw={600}>{t.dashboard.totalBalance}</Text>
-          <Money cents={total} fw={700} size="xl" />
+          <div>
+            <Text fw={600}>{t.dashboard.totalBalance}</Text>
+            <Text size="xs" c="dimmed">
+              {t.accounts.balanceTodayHint}
+            </Text>
+          </div>
+          <Stack gap={0} align="flex-end">
+            <Money cents={totalToday} fw={700} size="xl" />
+            {total !== totalToday && (
+              <Text size="xs" c="dimmed">
+                {t.accounts.balanceProjected(formatBRL(total), formatDateBR(end))}
+              </Text>
+            )}
+          </Stack>
         </Group>
       </Paper>
 
@@ -202,10 +279,38 @@ export function AccountsPage() {
                 </Menu.Dropdown>
               </Menu>
             </Group>
-            <Text size="xs" c="dimmed" mt="md">
-              {t.accounts.balance}
-            </Text>
-            <Money cents={balances.get(account.id) ?? 0} fw={700} size="lg" />
+            {account.type === 'creditCard' ? (
+              <>
+                <Text size="xs" c="dimmed" mt="md">
+                  {t.accounts.limitUsed}
+                </Text>
+                <Money cents={-(owed.get(account.id) ?? 0)} colored={false} fw={700} size="lg" />
+                {account.creditCard?.limitCents != null && (
+                  <Text size="xs" c="dimmed">
+                    {t.accounts.limitAvailable(
+                      formatBRL(account.creditCard.limitCents + (owed.get(account.id) ?? 0)),
+                    )}
+                  </Text>
+                )}
+                <Text size="xs" c="dimmed">
+                  {account.creditCard
+                    ? t.accounts.cardDays(account.creditCard.closingDay, account.creditCard.dueDay)
+                    : t.accounts.cardNotSet}
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text size="xs" c="dimmed" mt="md">
+                  {t.accounts.balanceToday}
+                </Text>
+                <Money cents={balancesToday.get(account.id) ?? 0} fw={700} size="lg" />
+                {(balancesToday.get(account.id) ?? 0) !== (balances.get(account.id) ?? 0) && (
+                  <Text size="xs" c="dimmed">
+                    {t.accounts.balanceProjected(formatBRL(balances.get(account.id) ?? 0), formatDateBR(end))}
+                  </Text>
+                )}
+              </>
+            )}
           </Paper>
         ))}
       </SimpleGrid>
@@ -220,6 +325,7 @@ export function AccountsPage() {
           <AccountForm
             editing={editing === 'new' ? null : editing}
             nextOrder={Math.max(-1, ...data.accounts.map((a) => a.order)) + 1}
+            accounts={data.accounts}
             onDone={() => setEditing(null)}
           />
         )}

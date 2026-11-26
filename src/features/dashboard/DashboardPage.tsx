@@ -1,12 +1,11 @@
 import { Alert, Button, Center, Group, Loader, Paper, SimpleGrid, Stack, Text, Title } from '@mantine/core';
-import { IconAlertCircle, IconCloudUpload, IconRepeat } from '@tabler/icons-react';
+import { IconAlertCircle, IconCloudUpload } from '@tabler/icons-react';
 import { Link } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useMemo, useState } from 'react';
 import { Chart, type ChartOption } from '../../components/Chart';
 import { axisMoney, tooltipMoney, useChartColor } from '../../components/chartFormat';
 import { Money, MonthSwitcher, PageHeader } from '../../components/common';
-import { pendingRecurringCount } from '../../components/options';
 import {
   accountBalances,
   balanceHistory,
@@ -16,24 +15,47 @@ import {
   monthlySeries,
   monthTotals,
 } from '../../domain/cashflow/summary';
-import { addMonths, currentMonth, formatMonthShort, monthRange } from '../../domain/dates';
+import {
+  addMonths,
+  currentMonth,
+  formatDateBR,
+  formatMonthShort,
+  monthEnd,
+  monthRange,
+  todayIso,
+} from '../../domain/dates';
 import { fromCents } from '../../domain/money';
 import { t } from '../../i18n/pt-BR';
 import { semantic } from '../../theme';
 import { getMeta, META } from '../../storage/db';
-import { generateRecurringForMonth } from '../../storage/repo';
 import { useFinanceData } from '../../storage/useFinanceData';
 import { exportBackupFile } from '../settings/backupActions';
 
 const BACKUP_REMINDER_DAYS = 30;
 
-function Stat({ label, cents, colored = true }: { label: string; cents: number; colored?: boolean }) {
+function Stat({
+  label,
+  cents,
+  colored = true,
+  alt,
+}: {
+  label: string;
+  cents: number;
+  colored?: boolean;
+  /** A related figure shown small (the other card-report option, the projected balance). */
+  alt?: { label: string; cents: number } | null;
+}) {
   return (
     <Paper>
       <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
         {label}
       </Text>
       <Money cents={cents} colored={colored} fw={700} size="xl" />
+      {alt && (
+        <Text size="xs" c="dimmed">
+          {alt.label}: <Money cents={alt.cents} colored={false} size="xs" />
+        </Text>
+      )}
     </Paper>
   );
 }
@@ -50,22 +72,23 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
 }
 
 export function DashboardPage() {
-  const data = useFinanceData();
+  const [month, setMonth] = useState(currentMonth());
+  const data = useFinanceData(month);
   // null = never backed up; undefined = loading
   const daysSinceBackup = useLiveQuery(async () => {
     const last = await getMeta(META.lastBackupAt);
     return last ? Math.floor((Date.now() - Date.parse(last)) / 86_400_000) : null;
   }, []);
-  const [month, setMonth] = useState(currentMonth());
   const color = useChartColor();
 
   const charts = useMemo(() => {
     if (!data) return null;
     const months = monthRange(addMonths(month, -11), month);
     const labels = months.map(formatMonthShort);
-    const series = monthlySeries(data.transactions, data.categoryIndex, months);
-    const history = balanceHistory(data.transactions, months, includedAccountIds(data.accounts));
-    const byCategory = expensesByCategory(data.transactions, data.categoryIndex, month);
+    const series = monthlySeries(data.budgetTransactions, data.categoryIndex, months);
+    // Card purchases on their bill due date or purchase date, per the setting (like the month totals).
+    const history = balanceHistory(data.budgetTransactions, months, includedAccountIds(data.accounts));
+    const byCategory = expensesByCategory(data.budgetTransactions, data.categoryIndex, month);
 
     const incomeVsExpense: ChartOption = {
       grid: { left: 8, right: 8, top: 36, bottom: 8, containLabel: true },
@@ -133,10 +156,24 @@ export function DashboardPage() {
     );
   }
 
-  const balances = accountBalances(data.transactions);
+  // "Hoje": entries up to today, matching the bank (future-dated entries only in "previsto" on Contas).
+  const balances = accountBalances(data.transactions, todayIso());
   const total = totalBalance(balances, data.accounts);
-  const totals = monthTotals(data.transactions, data.categoryIndex, month);
-  const pending = pendingRecurringCount(data, month);
+  // "Previsto": at the end of the month shown, with future entries and recurring ones still to come.
+  const end = monthEnd(month);
+  const projectedTotal =
+    end > todayIso()
+      ? totalBalance(accountBalances([...data.transactions, ...data.projected], end), data.accounts)
+      : null;
+  const totals = monthTotals(data.budgetTransactions, data.categoryIndex, month);
+  // Optional: the same month computed with the other card-report option (Configurações), shown small.
+  const altTotals =
+    data.showAltCardReport && data.altBudgetTransactions
+      ? monthTotals(data.altBudgetTransactions, data.categoryIndex, month)
+      : null;
+  const altLabel = data.cardReportMode === 'bill' ? t.dashboard.byPurchaseDate : t.dashboard.byBill;
+  const alt = (key: 'income' | 'expense' | 'net') =>
+    altTotals ? { label: altLabel, cents: altTotals[key] } : null;
   const uncategorized = data.transactions.filter((tx) => tx.categoryId === null && !tx.extraordinary).length;
   const showBackupReminder =
     data.transactions.length > 0 && (daysSinceBackup === null || daysSinceBackup >= BACKUP_REMINDER_DAYS);
@@ -172,22 +209,20 @@ export function DashboardPage() {
             </Group>
           </Alert>
         )}
-        {pending > 0 && (
-          <Alert icon={<IconRepeat size={18} />}>
-            <Group justify="space-between">
-              <Text size="sm">{t.dashboard.pendingRecurring(pending)}</Text>
-              <Button size="xs" variant="light" onClick={() => void generateRecurringForMonth(month)}>
-                {t.dashboard.generateNow}
-              </Button>
-            </Group>
-          </Alert>
-        )}
 
         <SimpleGrid cols={{ base: 2, md: 4 }} spacing="sm">
-          <Stat label={t.dashboard.totalBalance} cents={total} />
-          <Stat label={t.dashboard.income} cents={totals.income} colored={false} />
-          <Stat label={t.dashboard.expense} cents={totals.expense} colored={false} />
-          <Stat label={t.dashboard.net} cents={totals.net} />
+          <Stat
+            label={t.dashboard.totalBalanceToday}
+            cents={total}
+            alt={
+              projectedTotal === null
+                ? null
+                : { label: t.dashboard.projectedAt(formatDateBR(end)), cents: projectedTotal }
+            }
+          />
+          <Stat label={t.dashboard.income} cents={totals.income} colored={false} alt={alt('income')} />
+          <Stat label={t.dashboard.expense} cents={totals.expense} colored={false} alt={alt('expense')} />
+          <Stat label={t.dashboard.net} cents={totals.net} alt={alt('net')} />
         </SimpleGrid>
         {totals.extraordinary !== 0 && (
           <Text size="sm" c="dimmed">

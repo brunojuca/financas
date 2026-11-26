@@ -1,8 +1,6 @@
 import type { ComboboxItem } from '@mantine/core';
-import { generateRecurring } from '../domain/cashflow/recurring';
-import type { Account, Category, CategoryKind, YearMonth } from '../domain/types';
+import type { Account, Category, CategoryKind } from '../domain/types';
 import { t } from '../i18n/pt-BR';
-import type { FinanceData } from '../storage/useFinanceData';
 
 /** Active accounts, plus `keepId` even if archived (so editing old entries still shows it). */
 export function accountOptions(accounts: Account[], keepId?: string | null): ComboboxItem[] {
@@ -21,9 +19,4 @@ export function categoryOptions(
     .filter((c) => c.parentId === parentId && (kind === null || c.kind === kind))
     .filter((c) => !c.archived || c.id === keepId)
     .map((c) => ({ value: c.id, label: c.archived ? `${c.name} (${t.common.archived})` : c.name }));
-}
-
-/** How many recurring entries would be created for the month right now. */
-export function pendingRecurringCount(data: FinanceData, month: YearMonth): number {
-  return generateRecurring(data.recurring, data.transactions, data.categoryIndex, month, () => '').length;
 }

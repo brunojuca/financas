@@ -20,18 +20,17 @@ import { MonthPickerInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { useMediaQuery } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
-import { notifications } from '@mantine/notifications';
-import { IconPencil, IconPlayerPlay, IconPlus, IconTrash } from '@tabler/icons-react';
+import { IconPencil, IconPlayerPause, IconPlayerPlay, IconPlus, IconTrash } from '@tabler/icons-react';
 import { useState } from 'react';
 import { Money, MonthSwitcher, PageHeader } from '../../components/common';
 import { MoneyInput } from '../../components/MoneyInput';
-import { accountOptions, categoryOptions, pendingRecurringCount } from '../../components/options';
+import { accountOptions, categoryOptions } from '../../components/options';
 import { isDueIn, lastMonthOf } from '../../domain/cashflow/recurring';
-import { currentMonth, formatMonthLong, formatMonthShort, monthsBetween } from '../../domain/dates';
+import { currentMonth, formatMonthShort, monthsBetween } from '../../domain/dates';
 import { signedAmount } from '../../domain/money';
 import type { RecurringTemplate, YearMonth } from '../../domain/types';
 import { t } from '../../i18n/pt-BR';
-import { deleteRecurring, generateRecurringForMonth, newId, saveRecurring } from '../../storage/repo';
+import { deleteRecurring, newId, saveRecurring, setRecurringMonthSkipped } from '../../storage/repo';
 import { useFinanceData, type FinanceData } from '../../storage/useFinanceData';
 
 // MonthPickerInput works with `YYYY-MM-DD` strings (first day of the month).
@@ -110,9 +109,15 @@ function RecurringForm({
       subcategoryId: v.subcategoryId,
       dayOfMonth: Number(v.dayOfMonth),
       startMonth: fromPicker(v.startMonth)!,
-      endMonth: v.installmentMode ? null : fromPicker(v.endMonth),
+      // An installment template keeps an end set by "este e os próximos" (see Lançamentos).
+      endMonth: v.installmentMode
+        ? editing?.installments != null
+          ? editing.endMonth
+          : null
+        : fromPicker(v.endMonth),
       installments: v.installmentMode ? Number(v.installments) : null,
       active: v.active,
+      skippedMonths: editing?.skippedMonths ?? [],
     });
     onDone();
   };
@@ -182,6 +187,7 @@ function RecurringForm({
         <Group grow align="flex-start">
           <MonthPickerInput
             label={t.recurring.startMonth}
+            description={editing ? undefined : t.recurring.startHint}
             valueFormat="MMM/YYYY"
             key={form.key('startMonth')}
             {...form.getInputProps('startMonth')}
@@ -234,8 +240,8 @@ function schedule(r: RecurringTemplate, month: YearMonth): string {
 }
 
 export function RecurringPage() {
-  const data = useFinanceData();
   const [month, setMonth] = useState(currentMonth());
+  const data = useFinanceData(month);
   const [editing, setEditing] = useState<RecurringTemplate | 'new' | null>(null);
   const isMobile = useMediaQuery('(max-width: 48em)');
   if (!data) {
@@ -245,16 +251,14 @@ export function RecurringPage() {
       </Center>
     );
   }
-  const pending = pendingRecurringCount(data, month);
-  const generatedIds = new Set(
+  const storedIds = new Set(
     data.transactions.filter((x) => x.recurringMonth === month).map((x) => x.recurringId),
+  );
+  const projectedIds = new Set(
+    data.projected.filter((x) => x.recurringMonth === month).map((x) => x.recurringId),
   );
   const accountName = new Map(data.accounts.map((a) => [a.id, a.name]));
 
-  const generate = async () => {
-    const n = await generateRecurringForMonth(month);
-    notifications.show({ color: n ? 'teal' : 'gray', message: t.recurring.generated(n) });
-  };
   const confirmDelete = (r: RecurringTemplate) =>
     modals.openConfirmModal({
       title: t.recurring.deleteTitle,
@@ -275,25 +279,6 @@ export function RecurringPage() {
       <Text c="dimmed" size="sm" mb="md">
         {t.recurring.intro}
       </Text>
-      <Paper mb="md">
-        <Group justify="space-between">
-          <Text fw={600} tt="none">
-            {t.recurring.generate(formatMonthLong(month))}
-            {pending > 0 && (
-              <Badge ml="xs" variant="filled">
-                {t.recurring.pending(pending)}
-              </Badge>
-            )}
-          </Text>
-          <Button
-            leftSection={<IconPlayerPlay size={16} />}
-            disabled={pending === 0}
-            onClick={() => void generate()}
-          >
-            {t.dashboard.generateNow}
-          </Button>
-        </Group>
-      </Paper>
 
       {data.recurring.length === 0 && (
         <Text c="dimmed" ta="center">
@@ -320,10 +305,38 @@ export function RecurringPage() {
                       {schedule(r, month)}
                     </Text>
                     <Group gap={6} mt={4}>
-                      {generatedIds.has(r.id) ? (
+                      {storedIds.has(r.id) ? (
                         <Badge size="xs" color="teal" variant="light">
-                          {t.recurring.generatedThisMonth}
+                          {t.recurring.stored}
                         </Badge>
+                      ) : projectedIds.has(r.id) ? (
+                        <>
+                          <Badge size="xs" variant="outline">
+                            {t.recurring.projected}
+                          </Badge>
+                          <Button
+                            size="compact-xs"
+                            variant="subtle"
+                            leftSection={<IconPlayerPause size={12} />}
+                            onClick={() => void setRecurringMonthSkipped(r.id, month, true)}
+                          >
+                            {t.recurring.skip}
+                          </Button>
+                        </>
+                      ) : r.active && r.skippedMonths.includes(month) ? (
+                        <>
+                          <Badge size="xs" color="orange" variant="light">
+                            {t.recurring.skipped}
+                          </Badge>
+                          <Button
+                            size="compact-xs"
+                            variant="subtle"
+                            leftSection={<IconPlayerPlay size={12} />}
+                            onClick={() => void setRecurringMonthSkipped(r.id, month, false)}
+                          >
+                            {t.recurring.resume}
+                          </Button>
+                        </>
                       ) : !due ? (
                         <Badge size="xs" color="gray" variant="light">
                           {r.active ? t.recurring.notDue : t.common.archived}

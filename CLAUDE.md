@@ -88,7 +88,30 @@ Do not add dependencies beyond these without asking the user first.
 - Accounts have `includeInTotal`: when off, the account is left out of "Saldo total" and its history chart (e.g. a
   brokerage account whose títulos are tracked in Investimentos). Transfers to it then lower the total.
 - First run asks: start with the default seed, import a backup, or load demo data.
-- Credit-card statement closing/due dates are a later feature; the `creditCard` account type leaves room for it.
+- **Credit cards** (`src/domain/cashflow/creditCard.ts`): accounts of type `creditCard` have `creditCard` settings
+  (closing day, due day, limit, default paying account). Bills are named by **due month** and computed, not stored:
+  a purchase goes to the first bill closing after its date (the closing day itself → next bill); a payment (transfer
+  into the card) to the latest bill already closed. `Transaction.billMonth` is stored only when the user picks a bill
+  by hand (and for installments), so changing a card's days re-flows the other entries. Statements carry unpaid
+  balances (`remaining`) into the next bill. "Pagar fatura" creates a transfer from the paying account.
+- **Installments** ("parcelada", cards only): N entries dated on the purchase, on consecutive bills, sharing
+  `installmentGroupId`; the first takes the cents that don't divide evenly; the user can edit each before saving.
+- **Card purchases in monthly reports** (setting `cardReportMode`, `reportView`): by **bill** (default: each purchase
+  on its bill's due date, so each installment in its own bill — when money goes out) or by **purchase date**
+  (installment n counts n − 1 months after the purchase, same day — the spending as it is made). Applies to budget,
+  income/expense, category charts, Lançamentos (month and the date shown, with "compra em" when it differs) and the
+  total-balance history (`FinanceData.budgetTransactions`); account balances and the card limit always use real
+  dates. By bill, Lançamentos can group a bill's purchases into one expandable line (`META.groupCardBills`).
+  Optionally (`META.showAltCardReport`) Início also shows the month's income/expense/result with the other option,
+  small, from `FinanceData.altBudgetTransactions`; the budget page uses only the chosen option.
+- **Recurring entries** (`src/domain/cashflow/recurring.ts`): templates are the rule; future occurrences are
+  computed, not stored (`FinanceData.projected`, ids `rec:…`, shown as "Previsto" and counted in reports).
+  Occurrences dated up to today are stored automatically (`useAutoRecurring`: on open, on template changes,
+  on returning to the app). Editing a projected one stores it with that month's values. A stored occurrence
+  keeps `recurringId` + `recurringMonth`; deleting one adds the month to the template's `skippedMonths`,
+  "este e os próximos" sets `endMonth` and deletes later entries. Template edits only affect months not stored yet.
+- **Saldo hoje vs previsto**: "hoje" = entries dated up to today (should match the bank); "previsto" = at the
+  end of the month shown (Contas: the current month), with future-dated and projected recurring entries. A card's "limite usado" counts everything owed, future installments included.
 - Dates: ISO strings `YYYY-MM-DD` for calendar dates. Never use `new Date('YYYY-MM-DD')` for date math (timezone bugs); use the helpers in `src/domain/dates.ts`.
 - Rates: decimals (`0.1164` = 11,64%). Keep full precision; round only where the official method rounds (e.g. daily DI factor to 8 places, money to 2).
 - IDs: `crypto.randomUUID()`.
@@ -135,6 +158,13 @@ npm run update-reference # refresh src/reference/*.json (BCB SGS, IBGE) — publ
 
 Known: `npm audit` reports a ReDoS in `picomatch` ≤4.0.7 pulled in by build tooling only (not shipped to the browser);
 no patched release exists yet. Re-check when updating dependencies.
+
+## Versions
+
+- Semantic versioning, `0.x` while the app is young: minor (`0.3.0`) for new features or schema changes,
+  patch (`0.2.1`) for fixes only.
+- Each release: bump `version` in `package.json` (`npm version X.Y.Z --no-git-tag-version`), commit, then an
+  annotated tag `vX.Y.Z` on that commit, pushed with `git push --follow-tags`.
 
 ## Working rules for Claude
 

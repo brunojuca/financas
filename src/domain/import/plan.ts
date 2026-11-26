@@ -199,6 +199,7 @@ export function buildImportPlan(
         archived: false,
         order: accountOrder++,
         includeInTotal: true,
+        creditCard: null,
       };
       newAccounts.push(account);
       accountIdByKey.set(key, account.id);
@@ -311,6 +312,8 @@ export function buildImportPlan(
       recurringId: null,
       recurringMonth: null,
       installment: null,
+      billMonth: null,
+      installmentGroupId: null,
     };
     transactions.push(tx);
     if (isTransferCategory) transferRows.push({ tx, line: row.line });

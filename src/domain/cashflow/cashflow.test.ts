@@ -2,7 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { createDefaultSeed, findTransferCategory } from '../seed';
 import type { Budget, RecurringTemplate, Transaction } from '../types';
 import { budgetId, budgetReport } from './budget';
-import { generateRecurring, isDueIn } from './recurring';
+import {
+  dueRecurring,
+  generateRecurring,
+  isDueIn,
+  isProjected,
+  lastMonthOf,
+  projectRecurring,
+  ungeneratedMonths,
+} from './recurring';
 import {
   accountBalances,
   balanceHistory,
@@ -42,6 +50,8 @@ function tx(date: string, amountCents: number, accountId: string, category: stri
     recurringId: null,
     recurringMonth: null,
     installment: null,
+    billMonth: null,
+    installmentGroupId: null,
   };
 }
 
@@ -155,6 +165,13 @@ describe('summary', () => {
     ]);
   });
 
+  it("separates today's balance (entries up to today) from the projected one", () => {
+    const future = tx('2026-12-10', -50000, checking.id, 'Moradia');
+    const all = [...transactions, future];
+    expect(accountBalances(all, '2026-11-25').get(checking.id)).toBe(100000 + 500000 - 30000);
+    expect(accountBalances(all).get(checking.id)).toBe(100000 + 500000 - 30000 - 50000);
+  });
+
   it('leaves accounts flagged out of "Saldo total" out of the total and its history', () => {
     const withoutCard = accounts.map((a) => (a.id === card.id ? { ...a, includeInTotal: false } : a));
     const balances = accountBalances(transactions);
@@ -222,6 +239,7 @@ describe('recurring', () => {
     dayOfMonth: 31,
     startMonth: '2026-01',
     endMonth: null,
+    skippedMonths: [],
     installments: null,
     active: true,
   };
@@ -273,5 +291,58 @@ describe('recurring', () => {
     const first = generateRecurring([rent, salary], [], index, '2026-10', newId);
     expect(first.find((t) => t.recurringId === 'salary')?.amountCents).toBe(500000);
     expect(generateRecurring([rent, salary], first, index, '2026-10', newId)).toEqual([]);
+  });
+
+  it('skips months the user deleted and stops at an end month set on installments', () => {
+    const skipped = { ...rent, skippedMonths: ['2026-11'] };
+    expect(isDueIn(skipped, '2026-11')).toBe(false);
+    expect(isDueIn(skipped, '2026-12')).toBe(true);
+    const stopped = { ...laptop, endMonth: '2026-10' };
+    expect(lastMonthOf(stopped)).toBe('2026-10');
+    expect(isDueIn(stopped, '2026-11')).toBe(false);
+  });
+
+  it('stores occurrences due up to today, from the first month, only once', () => {
+    const due = dueRecurring([rent, laptop], [], index, '2026-11-25', newId);
+    // Rent Jan–Oct (Nov falls on the 30th, after today); notebook 1/3–3/3 (Sep–Nov, on the 20th).
+    expect(due.filter((t) => t.recurringId === 'rent').map((t) => t.recurringMonth)).toEqual(
+      ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10'].map((m) => `2026-${m}`),
+    );
+    expect(due.filter((t) => t.recurringId === 'laptop').map((t) => t.date)).toEqual([
+      '2026-09-20',
+      '2026-10-20',
+      '2026-11-20',
+    ]);
+    expect(dueRecurring([rent, laptop], due, index, '2026-11-25', newId)).toEqual([]);
+    expect(dueRecurring([rent, laptop], due, index, '2026-11-30', newId).map((t) => t.date)).toEqual([
+      '2026-11-30',
+    ]);
+  });
+
+  it('computes later occurrences as projected, leaving out months already stored or skipped', () => {
+    const edited = generateRecurring([rent], [], index, '2027-01', newId).map((t) => ({
+      ...t,
+      amountCents: -185000, // this month's value edited by the user
+    }));
+    const projected = projectRecurring(
+      [{ ...rent, skippedMonths: ['2027-02'] }],
+      edited,
+      index,
+      '2026-11-25',
+      '2027-03',
+    );
+    expect(projected.map((t) => [t.date, t.amountCents])).toEqual([
+      ['2026-11-30', -180000],
+      ['2026-12-31', -180000],
+      ['2027-03-31', -180000],
+    ]);
+    expect(projected.every(isProjected)).toBe(true);
+    expect(projected[0]!.id).toBe('rec:rent:2026-11');
+  });
+
+  it('lists past months without an entry (skipped when automatic generation starts)', () => {
+    const stored = generateRecurring([rent], [], index, '2026-02', newId);
+    expect(ungeneratedMonths(rent, stored, '2026-04')).toEqual(['2026-01', '2026-03']);
+    expect(ungeneratedMonths(rent, stored, '2026-01')).toEqual([]);
   });
 });

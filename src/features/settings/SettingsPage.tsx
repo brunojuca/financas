@@ -1,4 +1,4 @@
-import { Button, FileButton, Group, Paper, Stack, Text, Title } from '@mantine/core';
+import { Button, FileButton, Group, Paper, Radio, Stack, Switch, Text, Title } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import {
   IconDatabaseExport,
@@ -16,7 +16,7 @@ import { downloadFile } from '../../components/download';
 import { currentMonth, formatDateBR, todayIso } from '../../domain/dates';
 import { t } from '../../i18n/pt-BR';
 import { transactionsToCsv } from '../../storage/backup';
-import { db, getMeta, isStoragePersisted, META, requestPersistentStorage } from '../../storage/db';
+import { db, getMeta, isStoragePersisted, META, requestPersistentStorage, setMeta } from '../../storage/db';
 import { clearAllData, loadDemoData } from '../../storage/repo';
 import { exportBackupFile, importBackupFile } from './backupActions';
 
@@ -33,6 +33,8 @@ function Section({ title, children, danger }: { title: string; children: ReactNo
 
 export function SettingsPage() {
   const lastBackupAt = useLiveQuery(() => getMeta(META.lastBackupAt), []);
+  const cardReportMode = useLiveQuery(() => getMeta(META.cardReportMode), []);
+  const showAlt = useLiveQuery(() => getMeta(META.showAltCardReport), []);
   const [persisted, setPersisted] = useState<boolean | null>(null);
   useEffect(() => {
     void isStoragePersisted().then(setPersisted);
@@ -64,6 +66,34 @@ export function SettingsPage() {
     <>
       <PageHeader title={t.nav.settings} />
       <Stack maw={720}>
+        <Section title={t.settings.cardReportTitle}>
+          <Text size="sm" c="dimmed">
+            {t.settings.cardReportText}
+          </Text>
+          <Radio.Group
+            value={cardReportMode === 'purchase' ? 'purchase' : 'bill'}
+            onChange={(v) => void setMeta(META.cardReportMode, v)}
+          >
+            <Stack gap="xs">
+              <Radio
+                value="bill"
+                label={t.settings.cardReportBill}
+                description={t.settings.cardReportBillHint}
+              />
+              <Radio
+                value="purchase"
+                label={t.settings.cardReportPurchase}
+                description={t.settings.cardReportPurchaseHint}
+              />
+            </Stack>
+          </Radio.Group>
+          <Switch
+            label={t.settings.showAltCardReport}
+            description={t.settings.showAltCardReportHint}
+            checked={showAlt === 'true'}
+            onChange={(e) => void setMeta(META.showAltCardReport, String(e.currentTarget.checked))}
+          />
+        </Section>
         <Section title={t.settings.backupTitle}>
           <Text size="sm" c="dimmed">
             {t.settings.backupText}

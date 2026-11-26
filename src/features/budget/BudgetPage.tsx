@@ -87,8 +87,8 @@ function Section({ kind, rows, month }: { kind: CategoryKind; rows: BudgetRow[];
 }
 
 export function BudgetPage() {
-  const data = useFinanceData();
   const [month, setMonth] = useState(currentMonth());
+  const data = useFinanceData(month);
   if (!data) {
     return (
       <Center py="xl">
@@ -96,7 +96,13 @@ export function BudgetPage() {
       </Center>
     );
   }
-  const report = budgetReport(month, data.categories, data.categoryIndex, data.budgets, data.transactions);
+  const report = budgetReport(
+    month,
+    data.categories,
+    data.categoryIndex,
+    data.budgets,
+    data.budgetTransactions,
+  );
   const hasBudget = data.budgets.some((b) => b.month === month);
 
   const copy = async () => {

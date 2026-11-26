@@ -1,4 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie';
+import { ungeneratedMonths } from '../domain/cashflow/recurring';
+import { currentMonth } from '../domain/dates';
 import type { Lot, Redemption, Titulo } from '../domain/fixedIncome/types';
 import type { Account, Budget, Category, MetaEntry, RecurringTemplate, Transaction } from '../domain/types';
 
@@ -59,6 +61,40 @@ export class FinancasDb extends Dexie {
             if (typeof a.includeInTotal !== 'boolean') a.includeInTotal = true;
           }),
       );
+    // v6: credit cards — card settings on accounts; bill and installment group on transactions.
+    this.version(6)
+      .stores({
+        transactions: 'id, date, accountId, categoryId, transferId, recurringId, installmentGroupId',
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table('accounts')
+          .toCollection()
+          .modify((a: Record<string, unknown>) => {
+            if (a.creditCard === undefined) a.creditCard = null;
+          });
+        await tx
+          .table('transactions')
+          .toCollection()
+          .modify((t: Record<string, unknown>) => {
+            if (t.billMonth === undefined) t.billMonth = null;
+            if (t.installmentGroupId === undefined) t.installmentGroupId = null;
+          });
+      });
+    // v7: recurring entries are generated automatically. Past months that were never generated (or were
+    // deleted) become `skippedMonths`, so turning automatic generation on creates nothing in the past.
+    this.version(7)
+      .stores({})
+      .upgrade(async (tx) => {
+        const transactions = (await tx.table('transactions').toArray()) as Transaction[];
+        await tx
+          .table('recurring')
+          .toCollection()
+          .modify((r: RecurringTemplate) => {
+            if (!Array.isArray(r.skippedMonths))
+              r.skippedMonths = ungeneratedMonths({ ...r, skippedMonths: [] }, transactions, currentMonth());
+          });
+      });
   }
 }
 
@@ -73,6 +109,12 @@ export const META = {
   lastDate: 'lastDate',
   /** Investment projection scenario (JSON of `Scenario`). */
   scenario: 'scenario',
+  /** Which date card purchases count on in monthly reports (`CardReportMode`: 'bill' | 'purchase'). */
+  cardReportMode: 'cardReportMode',
+  /** Lançamentos: show card purchases grouped into one line per bill ('true' | 'false'). */
+  groupCardBills: 'groupCardBills',
+  /** Início: also show the month's figures computed with the other `cardReportMode` ('true' | 'false'). */
+  showAltCardReport: 'showAltCardReport',
 } as const;
 
 export async function getMeta(key: string): Promise<string | undefined> {

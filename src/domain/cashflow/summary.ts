@@ -19,10 +19,16 @@ export function isRegular(t: Transaction, categories: CategoryIndex): boolean {
   return !t.extraordinary && !isTransfer(t, categories);
 }
 
-/** Balance per account over all time (spreadsheet `Contas` sheet). */
-export function accountBalances(transactions: Transaction[]): Map<string, Cents> {
+/**
+ * Balance per account (spreadsheet `Contas` sheet). With `asOf`, only entries dated up to that day: the "Saldo hoje"
+ * that should match the bank. Without it, everything registered, including future-dated entries ("Saldo previsto").
+ */
+export function accountBalances(transactions: Transaction[], asOf?: string): Map<string, Cents> {
   const balances = new Map<string, Cents>();
-  for (const t of transactions) balances.set(t.accountId, (balances.get(t.accountId) ?? 0) + t.amountCents);
+  for (const t of transactions) {
+    if (asOf && t.date > asOf) continue;
+    balances.set(t.accountId, (balances.get(t.accountId) ?? 0) + t.amountCents);
+  }
   return balances;
 }
 

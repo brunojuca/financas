@@ -37,6 +37,8 @@ function tx(
     recurringId: null,
     recurringMonth: null,
     installment: null,
+    billMonth: null,
+    installmentGroupId: null,
     ...extra,
   };
 }

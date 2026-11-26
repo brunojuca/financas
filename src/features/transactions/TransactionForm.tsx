@@ -3,28 +3,46 @@ import {
   Button,
   Checkbox,
   Group,
+  NumberInput,
+  Paper,
   SegmentedControl,
   Select,
   SimpleGrid,
   Stack,
+  Table,
+  Text,
   type ComboboxParsedItem,
   type OptionsFilter,
 } from '@mantine/core';
 import { DateInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { MoneyInput } from '../../components/MoneyInput';
 import { accountOptions, categoryOptions } from '../../components/options';
+import { isProjected } from '../../domain/cashflow/recurring';
+import {
+  billForPayment,
+  billForPurchase,
+  buildInstallments,
+  dueDate,
+  splitInstallments,
+} from '../../domain/cashflow/creditCard';
 import { descriptionSuggestions } from '../../domain/cashflow/suggestions';
-import { isIsoDate, todayIso } from '../../domain/dates';
+import { addMonths, formatDateBR, formatMonthShort, isIsoDate, todayIso } from '../../domain/dates';
 import { normalizeName } from '../../domain/import/csv';
-import { signedAmount } from '../../domain/money';
+import { formatBRL, signedAmount } from '../../domain/money';
 import { findTransferCategory } from '../../domain/seed';
-import type { IsoDate, Transaction } from '../../domain/types';
+import type { CardSettings, IsoDate, Transaction, YearMonth } from '../../domain/types';
 import { t } from '../../i18n/pt-BR';
 import { META, setMeta } from '../../storage/db';
-import { deleteTransaction, newId, saveTransaction, saveTransfer } from '../../storage/repo';
+import {
+  deleteTransaction,
+  newId,
+  saveInstallments,
+  saveTransaction,
+  saveTransfer,
+} from '../../storage/repo';
 import type { FinanceData } from '../../storage/useFinanceData';
 
 /** `adjustment` = single-leg entry in the transfer category (e.g. opening balance); only reachable by editing. */
@@ -43,6 +61,10 @@ interface Values {
   subcategoryId: string | null;
   refund: boolean;
   extraordinary: boolean;
+  /** Credit-card bill chosen by hand; null = the default by date. */
+  billMonth: YearMonth | null;
+  /** Number of installments for a new card purchase (1 = à vista). */
+  installments: number | string;
 }
 
 /** The account of the last entry saved from this form, else the first active one. */
@@ -65,15 +87,26 @@ function initialValues(data: FinanceData, source: Transaction | null): Values {
       subcategoryId: null,
       refund: false,
       extraordinary: false,
+      billMonth: null,
+      installments: 1,
     };
   }
-  const base = { date: source.date, description: source.description, refund: false, extraordinary: false };
+  const base = {
+    date: source.date,
+    description: source.description,
+    refund: false,
+    extraordinary: false,
+    billMonth: source.billMonth,
+    installments: 1,
+  };
   if (source.transferId) {
     const legs = data.transactions.filter((x) => x.transferId === source.transferId);
     const from = legs.find((x) => x.amountCents < 0) ?? source;
     const to = legs.find((x) => x.amountCents > 0);
     return {
       ...base,
+      // A transfer into a card is a bill payment: its bill is on the card leg.
+      billMonth: to?.billMonth ?? from.billMonth,
       mode: 'transfer',
       amount: Math.abs(source.amountCents),
       accountId: from.accountId,
@@ -118,6 +151,23 @@ const descriptionFilter: OptionsFilter = ({ options, search }) => {
   );
 };
 
+/** Card settings of an account, when it is a credit card with closing/due days set. */
+function cardOf(data: FinanceData, accountId: string | null): CardSettings | null {
+  const account = data.accounts.find((a) => a.id === accountId);
+  return account?.type === 'creditCard' ? account.creditCard : null;
+}
+
+/** Bills around `around` to choose from, labelled with their due date. */
+function billOptions(card: CardSettings, around: YearMonth) {
+  return [-1, 0, 1, 2, 3].map((offset) => {
+    const month = addMonths(around, offset);
+    return {
+      value: month,
+      label: t.transactions.billOption(formatMonthShort(month), formatDateBR(dueDate(card, month))),
+    };
+  });
+}
+
 interface Props {
   data: FinanceData;
   /** Entry being edited; null for a new one. */
@@ -152,6 +202,39 @@ export function TransactionForm({ data, editing, duplicateOf = null, calendarDat
     },
   });
   const { mode, categoryId } = form.getValues();
+  const values = form.getValues();
+
+  // Credit card: which account carries the bill, and its default bill for this date.
+  const purchaseCard = mode === 'expense' || mode === 'income' ? cardOf(data, values.accountId) : null;
+  const paymentCard = mode === 'transfer' ? cardOf(data, values.toAccountId) : null;
+  const card = purchaseCard ?? paymentCard;
+  const defaultBill =
+    card && isIsoDate(values.date)
+      ? paymentCard
+        ? billForPayment(paymentCard, values.date)
+        : billForPurchase(card, values.date)
+      : null;
+  const chosenBill = values.billMonth ?? defaultBill;
+  // Installments: only for a new purchase on a card.
+  const canSplit = !editing && purchaseCard !== null && mode === 'expense' && !values.refund;
+  const count = canSplit ? Math.max(1, Math.min(48, Number(values.installments) || 1)) : 1;
+  const splitKey = `${values.amount}-${count}`;
+  const [overrides, setOverrides] = useState<{ key: string; amounts: Record<number, number | null> }>({
+    key: splitKey,
+    amounts: {},
+  });
+  const split =
+    count > 1 && values.amount && values.amount > 0 ? splitInstallments(values.amount, count) : [];
+  const edited = overrides.key === splitKey ? overrides.amounts : {};
+  const installmentAmounts = split.map((v, i) => edited[i] ?? v);
+  const installmentsSum = installmentAmounts.reduce<number>((s, v) => s + (v ?? 0), 0);
+  const splitError =
+    split.length > 0 && installmentsSum !== values.amount
+      ? t.transactions.installmentsSum(formatBRL(installmentsSum), formatBRL(values.amount ?? 0))
+      : null;
+  /** What to store: the bill only when chosen by hand (or always for installments, which need it). */
+  const billToStore = (keep: boolean) =>
+    chosenBill && (keep || chosenBill !== defaultBill) ? chosenBill : null;
 
   const suggestions = useMemo(
     () =>
@@ -191,13 +274,30 @@ export function TransactionForm({ data, editing, duplicateOf = null, calendarDat
         toAccountId: v.toAccountId!,
         transferCategoryId: transferCategory.id,
         transferId: editing?.transferId ?? undefined,
+        billMonths: paymentCard ? { to: billToStore(false) } : undefined,
       });
+    } else if (count > 1) {
+      if (splitError) return;
+      const parcels = buildInstallments(
+        {
+          date,
+          description: v.description.trim() || data.categoryIndex.get(v.categoryId ?? '')?.name || '',
+          accountId: v.accountId!,
+          categoryId: v.categoryId,
+          subcategoryId: v.categoryId ? v.subcategoryId : null,
+          amounts: installmentAmounts as number[],
+          firstBill: chosenBill!,
+        },
+        newId,
+      );
+      await saveInstallments(parcels);
     } else {
       if (editing?.transferId) await deleteTransaction(editing);
       const keepLink = editing && !editing.transferId;
       const category = v.mode === 'adjustment' || !v.categoryId ? null : data.categoryIndex.get(v.categoryId);
       await saveTransaction({
-        id: keepLink ? editing.id : newId(),
+        // A projected recurring entry ("previsto") is stored now, with that month's values.
+        id: keepLink && !isProjected(editing) ? editing.id : newId(),
         date,
         description: v.description.trim() || category?.name || '',
         amountCents: v.mode === 'adjustment' ? cents : signedAmount(v.mode, cents) * (v.refund ? -1 : 1),
@@ -209,11 +309,16 @@ export function TransactionForm({ data, editing, duplicateOf = null, calendarDat
         recurringId: keepLink ? editing.recurringId : null,
         recurringMonth: keepLink ? editing.recurringMonth : null,
         installment: keepLink ? editing.installment : null,
+        billMonth: purchaseCard ? billToStore(!!(keepLink && editing.installmentGroupId)) : null,
+        installmentGroupId: keepLink ? editing.installmentGroupId : null,
       });
     }
     await setMeta(META.lastAccountId, v.accountId!);
     await setMeta(META.lastDate, date);
-    notifications.show({ color: 'teal', message: t.transactions.saved });
+    notifications.show({
+      color: 'teal',
+      message: count > 1 ? t.transactions.installmentsSaved(count) : t.transactions.saved,
+    });
     onDone();
   };
 
@@ -285,6 +390,67 @@ export function TransactionForm({ data, editing, duplicateOf = null, calendarDat
             key={form.key('toAccountId')}
             {...form.getInputProps('toAccountId')}
           />
+        )}
+        {card && defaultBill && (
+          <Select
+            label={t.transactions.bill}
+            description={paymentCard ? t.transactions.billPayHint : t.transactions.billHint}
+            data={billOptions(card, defaultBill)}
+            allowDeselect={false}
+            value={chosenBill}
+            onChange={(v) => form.setFieldValue('billMonth', v)}
+          />
+        )}
+        {canSplit && (
+          <NumberInput
+            label={t.transactions.installments}
+            description={t.transactions.installmentsHint}
+            min={1}
+            max={48}
+            allowDecimal={false}
+            key={form.key('installments')}
+            {...form.getInputProps('installments')}
+          />
+        )}
+        {split.length > 0 && chosenBill && (
+          <Paper withBorder p="xs">
+            <Table verticalSpacing={2}>
+              <Table.Tbody>
+                {installmentAmounts.map((amount, i) => (
+                  <Table.Tr key={i}>
+                    <Table.Td w={60}>{t.transactions.installmentRow(i + 1, count)}</Table.Td>
+                    <Table.Td>
+                      <Text size="sm" c="dimmed">
+                        {formatMonthShort(addMonths(chosenBill, i))}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td w={170}>
+                      <MoneyInput
+                        size="xs"
+                        aria-label={t.transactions.installmentRow(i + 1, count)}
+                        value={amount}
+                        onChange={(cents) =>
+                          setOverrides({ key: splitKey, amounts: { ...edited, [i]: cents } })
+                        }
+                      />
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+            <Group justify="space-between" mt={4}>
+              <Text size="xs" c={splitError ? 'red' : 'dimmed'}>
+                {splitError ?? `${formatBRL(installmentsSum)}`}
+              </Text>
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                onClick={() => setOverrides({ key: splitKey, amounts: {} })}
+              >
+                {t.transactions.installmentsReset}
+              </Button>
+            </Group>
+          </Paper>
         )}
         {(mode === 'expense' || mode === 'income') && (
           <>

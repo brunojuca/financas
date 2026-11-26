@@ -1,5 +1,5 @@
 import { budgetId } from '../domain/cashflow/budget';
-import { generateRecurring } from '../domain/cashflow/recurring';
+import { dueRecurring, isProjected } from '../domain/cashflow/recurring';
 import { indexCategories } from '../domain/cashflow/summary';
 import { buildTransfer, type TransferInput } from '../domain/cashflow/transfer';
 import { addMonths, todayIso } from '../domain/dates';
@@ -113,6 +113,8 @@ export async function saveAccount(account: Account, openingBalanceCents: Cents =
         recurringId: null,
         recurringMonth: null,
         installment: null,
+        billMonth: null,
+        installmentGroupId: null,
       });
     }
   });
@@ -196,11 +198,29 @@ export async function updateTransaction(
   await db.transactions.update(id, changes);
 }
 
-/** Deletes a transaction; for a transfer, deletes both legs. */
+/** Saves the installments of a card purchase (all entries of one group). */
+export async function saveInstallments(installments: Transaction[]): Promise<void> {
+  await db.transactions.bulkPut(installments);
+}
+
+/** Deletes every installment of a card purchase. */
+export async function deleteInstallmentGroup(groupId: string): Promise<void> {
+  await db.transactions.where('installmentGroupId').equals(groupId).delete();
+}
+
+/**
+ * Deletes a transaction; for a transfer, deletes both legs. A recurring occurrence (stored or projected)
+ * also skips its month in the template, so it is not created again.
+ */
 export async function deleteTransaction(transaction: Transaction): Promise<void> {
-  if (transaction.transferId)
-    await db.transactions.where('transferId').equals(transaction.transferId).delete();
-  else await db.transactions.delete(transaction.id);
+  await db.transaction('rw', [db.transactions, db.recurring], async () => {
+    if (transaction.recurringId && transaction.recurringMonth)
+      await setRecurringMonthSkipped(transaction.recurringId, transaction.recurringMonth, true);
+    if (isProjected(transaction)) return;
+    if (transaction.transferId)
+      await db.transactions.where('transferId').equals(transaction.transferId).delete();
+    else await db.transactions.delete(transaction.id);
+  });
 }
 
 // ---------- budgets ----------
@@ -236,15 +256,42 @@ export async function deleteRecurring(id: string): Promise<void> {
   });
 }
 
-/** Creates the month's entries from active templates. Safe to run more than once. */
-export async function generateRecurringForMonth(month: YearMonth): Promise<number> {
+/** Skips (or brings back) one month of a template. A month brought back is stored again if already due. */
+export async function setRecurringMonthSkipped(
+  id: string,
+  month: YearMonth,
+  skipped: boolean,
+): Promise<void> {
+  await db.recurring
+    .where('id')
+    .equals(id)
+    .modify((r) => {
+      const others = r.skippedMonths.filter((m) => m !== month);
+      r.skippedMonths = skipped ? [...others, month].sort() : others;
+    });
+}
+
+/** Ends a template before `month` ("este e os próximos"): deletes its entries from that month on. */
+export async function endRecurringFrom(id: string, month: YearMonth): Promise<void> {
+  await db.transaction('rw', [db.recurring, db.transactions], async () => {
+    await db.recurring.update(id, { endMonth: addMonths(month, -1) });
+    await db.transactions
+      .where('recurringId')
+      .equals(id)
+      .filter((t) => t.recurringMonth !== null && t.recurringMonth >= month)
+      .delete();
+  });
+}
+
+/** Stores the recurring occurrences dated up to `today` that are not stored yet. Safe to run any time. */
+export async function generateDueRecurring(today: string = todayIso()): Promise<number> {
   return db.transaction('rw', [db.recurring, db.transactions, db.categories], async () => {
     const [templates, categories, existing] = await Promise.all([
       db.recurring.toArray(),
       db.categories.toArray(),
-      db.transactions.filter((t) => t.recurringMonth === month).toArray(),
+      db.transactions.where('recurringId').notEqual('').toArray(),
     ]);
-    const created = generateRecurring(templates, existing, indexCategories(categories), month, newId);
+    const created = dueRecurring(templates, existing, indexCategories(categories), today, newId);
     await db.transactions.bulkPut(created);
     return created.length;
   });

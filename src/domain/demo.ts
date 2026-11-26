@@ -1,4 +1,5 @@
 import { budgetId } from './cashflow/budget';
+import { billForPurchase, buildInstallments, splitInstallments } from './cashflow/creditCard';
 import { generateRecurring } from './cashflow/recurring';
 import { indexCategories } from './cashflow/summary';
 import { buildTransfer } from './cashflow/transfer';
@@ -39,6 +40,8 @@ export function createDemoData(lastMonth: YearMonth, newId: () => string): DemoD
   const checking = account('checking');
   const savings = account('savings');
   const card = account('creditCard');
+  // Closes on the 1st, due on the 8th (the demo pays the bill on the 8th), paid from the checking account.
+  card.creditCard = { closingDay: 1, dueDay: 8, limitCents: 8_000_00, payingAccountId: null };
   const transferCategory = findTransferCategory(categories)!;
   const firstMonth = addMonths(lastMonth, -5);
   const months = monthRange(firstMonth, lastMonth);
@@ -63,6 +66,7 @@ export function createDemoData(lastMonth: YearMonth, newId: () => string): DemoD
     dayOfMonth: day,
     startMonth: inst ? addMonths(firstMonth, 1) : firstMonth,
     endMonth: null,
+    skippedMonths: [],
     installments: inst,
     active: true,
   }));
@@ -81,6 +85,8 @@ export function createDemoData(lastMonth: YearMonth, newId: () => string): DemoD
       recurringId: null,
       recurringMonth: null,
       installment: null,
+      billMonth: null,
+      installmentGroupId: null,
     },
   ];
 
@@ -111,6 +117,8 @@ export function createDemoData(lastMonth: YearMonth, newId: () => string): DemoD
     recurringId: null,
     recurringMonth: null,
     installment: null,
+    billMonth: null,
+    installmentGroupId: null,
   });
 
   for (const month of months) {
@@ -130,6 +138,8 @@ export function createDemoData(lastMonth: YearMonth, newId: () => string): DemoD
         recurringId: null,
         recurringMonth: null,
         installment: null,
+        billMonth: null,
+        installmentGroupId: null,
       });
     }
     transactions.push(
@@ -176,6 +186,24 @@ export function createDemoData(lastMonth: YearMonth, newId: () => string): DemoD
       categoryId: cat(name).id,
       amountCents: reais * 100,
     })),
+  );
+
+  card.creditCard.payingAccountId = checking.id;
+  // A purchase split in 6 installments two months before the last month.
+  const splitMonth = addMonths(lastMonth, -2);
+  transactions.push(
+    ...buildInstallments(
+      {
+        date: dateInMonth(splitMonth, 12),
+        description: 'Geladeira',
+        accountId: card.id,
+        categoryId: cat('Moradia').id,
+        subcategoryId: null,
+        amounts: splitInstallments(3_600_00, 6),
+        firstBill: billForPurchase(card.creditCard, dateInMonth(splitMonth, 12)),
+      },
+      newId,
+    ),
   );
 
   return { accounts, categories, transactions, budgets, recurring };

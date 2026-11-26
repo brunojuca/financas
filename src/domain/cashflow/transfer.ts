@@ -1,4 +1,4 @@
-import type { Cents, IsoDate, Transaction } from '../types';
+import type { Cents, IsoDate, Transaction, YearMonth } from '../types';
 
 export interface TransferInput {
   date: IsoDate;
@@ -10,6 +10,8 @@ export interface TransferInput {
   transferCategoryId: string;
   /** Reuse when editing an existing transfer. */
   transferId?: string;
+  /** Bill of each leg when it is a credit card (e.g. the bill a payment pays). */
+  billMonths?: { from?: YearMonth | null; to?: YearMonth | null };
   legIds?: [string, string];
 }
 
@@ -28,9 +30,23 @@ export function buildTransfer(input: TransferInput, newId: () => string): [Trans
     recurringId: null,
     recurringMonth: null,
     installment: null,
+    billMonth: null,
+    installmentGroupId: null,
   };
   return [
-    { ...base, id: input.legIds?.[0] ?? newId(), accountId: input.fromAccountId, amountCents: -amount },
-    { ...base, id: input.legIds?.[1] ?? newId(), accountId: input.toAccountId, amountCents: amount },
+    {
+      ...base,
+      id: input.legIds?.[0] ?? newId(),
+      accountId: input.fromAccountId,
+      amountCents: -amount,
+      billMonth: input.billMonths?.from ?? null,
+    },
+    {
+      ...base,
+      id: input.legIds?.[1] ?? newId(),
+      accountId: input.toAccountId,
+      amountCents: amount,
+      billMonth: input.billMonths?.to ?? null,
+    },
   ];
 }

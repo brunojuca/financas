@@ -1,4 +1,5 @@
-import { isIsoDate, isYearMonth, formatDateBR } from '../domain/dates';
+import { ungeneratedMonths } from '../domain/cashflow/recurring';
+import { currentMonth, isIsoDate, isYearMonth, formatDateBR } from '../domain/dates';
 import { formatDecimal } from '../domain/money';
 import type { Lot, Redemption, Titulo } from '../domain/fixedIncome/types';
 import type { Account, Budget, Category, RecurringTemplate, Transaction } from '../domain/types';
@@ -9,8 +10,10 @@ export const BACKUP_APP = 'financas';
  * v2: transactions gained `extraordinary` and may have `categoryId: null`.
  * v3: investments (`titulos`, `lots`, `redemptions`); missing in older files → empty.
  * v4: accounts gained `includeInTotal`; missing in older files → true.
+ * v5: credit cards — `creditCard` on accounts, `billMonth` and `installmentGroupId` on transactions; missing → null.
+ * v6: recurring templates gained `skippedMonths`; missing → past months without an entry (see db v7).
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 6;
 
 export interface BackupData {
   accounts: Account[];
@@ -123,7 +126,9 @@ export function parseBackup(raw: unknown): BackupFile {
       isNullableStr(r.subcategoryId) &&
       (r.extraordinary === undefined || typeof r.extraordinary === 'boolean') &&
       isNullableStr(r.transferId) &&
-      isNullableStr(r.recurringId),
+      isNullableStr(r.recurringId) &&
+      (r.billMonth === undefined || r.billMonth === null || isYearMonth(r.billMonth)) &&
+      (r.installmentGroupId === undefined || isNullableStr(r.installmentGroupId)),
   );
   all('budgets', (r) => isStr(r.id) && isYearMonth(r.month) && isStr(r.categoryId) && isInt(r.amountCents));
   all(
@@ -135,7 +140,9 @@ export function parseBackup(raw: unknown): BackupFile {
       isStr(r.accountId) &&
       isStr(r.categoryId) &&
       isInt(r.dayOfMonth) &&
-      isYearMonth(r.startMonth),
+      isYearMonth(r.startMonth) &&
+      (r.skippedMonths === undefined ||
+        (Array.isArray(r.skippedMonths) && r.skippedMonths.every((m) => isYearMonth(m)))),
   );
   all(
     'titulos',
@@ -203,21 +210,30 @@ export async function restoreBackup(file: BackupFile): Promise<void> {
           ...a,
           order: a.order ?? i,
           includeInTotal: a.includeInTotal ?? true,
+          creditCard: a.creditCard ?? null, // before v5
         })),
       );
       await db.categories.bulkPut(
         data.categories.map((c, i) => ({ ...c, archived: c.archived ?? false, order: c.order ?? i })),
       );
-      await db.transactions.bulkPut(
-        data.transactions.map((t) => ({
-          ...t,
-          extraordinary: t.extraordinary ?? false, // v1 backups
-          recurringMonth: t.recurringMonth ?? null,
-          installment: t.installment ?? null,
+      const transactions = data.transactions.map((t) => ({
+        ...t,
+        extraordinary: t.extraordinary ?? false, // v1 backups
+        recurringMonth: t.recurringMonth ?? null,
+        installment: t.installment ?? null,
+        billMonth: t.billMonth ?? null, // before v5
+        installmentGroupId: t.installmentGroupId ?? null,
+      }));
+      await db.transactions.bulkPut(transactions);
+      await db.budgets.bulkPut(data.budgets);
+      await db.recurring.bulkPut(
+        data.recurring.map((r) => ({
+          ...r,
+          // before v6: months never generated stay empty (see db v7)
+          skippedMonths:
+            r.skippedMonths ?? ungeneratedMonths({ ...r, skippedMonths: [] }, transactions, currentMonth()),
         })),
       );
-      await db.budgets.bulkPut(data.budgets);
-      await db.recurring.bulkPut(data.recurring);
       await db.titulos.bulkPut(data.titulos);
       await db.lots.bulkPut(data.lots);
       await db.redemptions.bulkPut(data.redemptions);

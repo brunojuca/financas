@@ -15,6 +15,19 @@ export interface Account {
   order: number;
   /** Counted in "Saldo total" (and its history chart). Off for e.g. a brokerage account tracked in Investimentos. */
   includeInTotal: boolean;
+  /** Credit-card settings (type `creditCard` only); null until the user sets them. */
+  creditCard: CardSettings | null;
+}
+
+export interface CardSettings {
+  /** Day of the month the bill closes (1–31, clamped to short months). */
+  closingDay: number;
+  /** Day of the month the bill is due (1–31). */
+  dueDay: number;
+  /** Credit limit, when known. */
+  limitCents: Cents | null;
+  /** Account that usually pays the bill (pre-filled in "Pagar fatura"). */
+  payingAccountId: string | null;
 }
 
 export type CategoryKind = 'income' | 'expense' | 'transfer';
@@ -55,6 +68,10 @@ export interface Transaction {
   recurringId: string | null;
   recurringMonth: YearMonth | null;
   installment: Installment | null;
+  /** Credit-card entries: the bill (by due month) this purchase or payment belongs to. null elsewhere. */
+  billMonth: YearMonth | null;
+  /** Shared by the installments of one purchase split on a credit card ("parcelada"). */
+  installmentGroupId: string | null;
 }
 
 export interface Budget {
@@ -77,11 +94,13 @@ export interface RecurringTemplate {
   /** 1–31; clamped to the last day of short months. */
   dayOfMonth: number;
   startMonth: YearMonth;
-  /** Last month (inclusive). Ignored when `installments` is set. null = no end. */
+  /** Last month (inclusive); with `installments`, an earlier stop ("este e os próximos" deleted). null = no end. */
   endMonth: YearMonth | null;
   /** Number of installments, or null for an ongoing fixed entry. */
   installments: number | null;
   active: boolean;
+  /** Months that produce nothing (the user deleted that month's entry). */
+  skippedMonths: YearMonth[];
 }
 
 export interface MetaEntry {

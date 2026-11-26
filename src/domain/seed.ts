@@ -84,6 +84,7 @@ export function createDefaultSeed(newId: () => string): Seed {
     archived: false,
     order,
     includeInTotal: true,
+    creditCard: null,
   }));
   const categories: Category[] = [];
   DEFAULT_CATEGORIES.forEach((c, order) => {

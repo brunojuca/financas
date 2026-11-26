@@ -11,8 +11,11 @@ interface Props extends Omit<TextInputProps, 'value' | 'onChange' | 'defaultValu
 
 /** Keeps the caret at the end: digits always enter from the right. */
 function caretToEnd(input: HTMLInputElement) {
-  // After React re-renders the formatted value.
-  requestAnimationFrame(() => input.setSelectionRange(input.value.length, input.value.length));
+  // After React re-renders the formatted value. Leave a selection made meanwhile (e.g. Ctrl+A) alone.
+  requestAnimationFrame(() => {
+    if (input.selectionStart !== input.selectionEnd) return;
+    input.setSelectionRange(input.value.length, input.value.length);
+  });
 }
 
 /**
