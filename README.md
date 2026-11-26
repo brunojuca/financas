@@ -4,7 +4,7 @@ Personal finance app that runs entirely in the browser (interface in Brazilian P
 Track transactions, account balances, a monthly budget per category and recurring/installment entries;
 import transactions from CSV.
 
-**Live app:** https://brunojuca.github.io/financas/
+**Live app:** https://financas.brunojuca.com
 
 ## Privacy
 
@@ -28,3 +28,7 @@ npm run build     # static site in dist/
 
 Calculations are ported from spreadsheets and documented in [docs/spreadsheet-reference.md](docs/spreadsheet-reference.md);
 project conventions are in [CLAUDE.md](CLAUDE.md).
+
+## License
+
+[MIT](LICENSE)
